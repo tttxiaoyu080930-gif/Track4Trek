@@ -112,6 +112,21 @@ Publish the verified build through the configured hosting service. When connecti
 
 Never copy DNS values from an old tutorial; use the values shown by the current hosting project.
 
+### Current Track4Trek DNS records
+
+The hosting project for `siuyuk.xyz` was created on 24 August 2026. In Dynadot, add these records exactly:
+
+| Type | Host/name | Value |
+| --- | --- | --- |
+| A | `@` | `162.159.143.30` |
+| A | `@` | `172.66.3.26` |
+| TXT | `_openai-site-verification` | `openai-site-verification=2LCuiCMiNkqXmGx3C2pMw-j0xfWypJ12J3aD0QTO4Aw` |
+| TXT | `_cf-custom-hostname` | `4b026a49-6e13-408f-85ec-1455530a03e8` |
+
+Dynadot may display the two TXT names as full hostnames ending in `.siuyuk.xyz`; that is the same configuration. Do not create the supplied CNAME target at the root domain because the two A records are the apex routing records.
+
+The first Track4Trek deployment is owner-only. This is useful for checking the finished page before it is shared. When the page is ready for university reviewers, explicitly approve a public deployment; making the site public is separate from adding DNS records.
+
 ## 10. Recommended working rhythm
 
 For every page or feature:
