@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://siuyuk.xyz"),
-  title: "Track4Trek | Open route-demand analysis",
+  title: "Track4Trek | Route readiness, explained",
   description:
-    "An open geospatial engineering project that translates trekking routes, target time, pack load, elevation, and weather into explainable demand profiles.",
+    "Upload a trekking route and preview the terrain, effort and environmental demands behind your planned attempt.",
   openGraph: {
     title: "Track4Trek",
     description: "Know what the trail asks of you.",
