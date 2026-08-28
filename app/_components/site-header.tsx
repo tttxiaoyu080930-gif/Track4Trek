@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { TransitionLink } from "./transition-link";
 
 type SiteHeaderProps = {
   active?: "plan" | "results";
@@ -8,21 +8,21 @@ type SiteHeaderProps = {
 export function SiteHeader({ active, minimal = false }: SiteHeaderProps) {
   return (
     <header className={`site-header${minimal ? " is-minimal" : ""}`}>
-      <Link className="site-brand" href="/" aria-label="Track4Trek home">
+      <TransitionLink className="site-brand" href="/" aria-label="Track4Trek home">
         <span className="brand-orbit" aria-hidden="true">
           <i />
         </span>
         <span className="brand-wordmark">Track<span>4</span>Trek</span>
-      </Link>
+      </TransitionLink>
 
       {!minimal && (
         <nav className="header-nav" aria-label="Main navigation">
-          <Link href="/#route-input" aria-current={active === "plan" ? "page" : undefined}>
+          <TransitionLink href="/#route-input" aria-current={active === "plan" ? "page" : undefined}>
             Plan a route
-          </Link>
-          <Link href="/results" aria-current={active === "results" ? "page" : undefined}>
+          </TransitionLink>
+          <TransitionLink href="/results" aria-current={active === "results" ? "page" : undefined}>
             Result preview
-          </Link>
+          </TransitionLink>
         </nav>
       )}
 

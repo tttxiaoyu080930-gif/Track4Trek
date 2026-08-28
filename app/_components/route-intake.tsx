@@ -1,8 +1,10 @@
 "use client";
 
 import { DragEvent, FormEvent, useId, useState } from "react";
+import { usePageTransition } from "./page-transition";
 
 export function RouteIntake() {
+  const transitionTo = usePageTransition();
   const inputId = useId();
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState("");
@@ -27,7 +29,7 @@ export function RouteIntake() {
 
   function beginPreview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    window.location.assign("/analyzing");
+    transitionTo("/analyzing");
   }
 
   return (

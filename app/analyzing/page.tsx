@@ -1,18 +1,21 @@
 "use client";
 
-import { CSSProperties, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
 import { SiteHeader } from "../_components/site-header";
+import { usePageTransition } from "../_components/page-transition";
+import { TransitionLink } from "../_components/transition-link";
 
 const stages = [
   "Reading route",
   "Sampling elevation",
-  "Summarising climbs",
-  "Checking planned conditions",
-  "Preparing results",
+  "Tracing climbs",
+  "Checking conditions",
+  "Preparing preview",
 ];
 
 export default function AnalyzingPage() {
+  const transitionTo = usePageTransition();
   const [progress, setProgress] = useState(0);
 
   useEffect(() => {
@@ -26,100 +29,56 @@ export default function AnalyzingPage() {
         }
         return Math.min(100, current + increment);
       });
-    }, reducedMotion ? 80 : 70);
+    }, 70);
 
     return () => window.clearInterval(interval);
   }, []);
 
   useEffect(() => {
     if (progress !== 100) return;
-    const redirect = window.setTimeout(() => window.location.assign("/results"), 1400);
+    const redirect = window.setTimeout(() => transitionTo("/results"), 500);
     return () => window.clearTimeout(redirect);
-  }, [progress]);
+  }, [progress, transitionTo]);
 
-  const activeStage = useMemo(
-    () => Math.min(stages.length - 1, Math.floor(progress / 20)),
-    [progress],
-  );
-
-  const progressStyle = {
-    "--analysis-progress": `${progress}%`,
-  } as CSSProperties;
+  const stageIndex = Math.min(stages.length - 1, Math.floor(progress / 20));
+  const stage = progress === 100 ? "Route ready" : stages[stageIndex];
+  const progressStyle = { "--analysis-progress": `${progress}%` } as CSSProperties;
 
   return (
-    <main className="site-page analysis-page" id="main-content">
-      <a className="skip-link" href="#analysis-progress">Skip to analysis status</a>
-      <SiteHeader active="plan" />
+    <main className="site-page analysis-page simplified-analysis" id="main-content">
+      <a className="skip-link" href="#analysis-progress">Skip to progress</a>
+      <SiteHeader active="plan" minimal />
 
-      <section className="analysis-shell" aria-labelledby="analysis-title">
-        <div className="analysis-copy">
-          <p className="prototype-kicker"><span aria-hidden="true" /> Visual prototype</p>
-          <h1 id="analysis-title">Building your route preview</h1>
-          <p>
-            Showing how Track4Trek will turn route and trip details into a clear result.
-          </p>
-          <p className="prototype-note">No route data is being analysed in Phase 1.</p>
-        </div>
-
-        <div className="analysis-console" id="analysis-progress">
-          <div
-            className="progress-dial"
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={progress}
-            aria-label="Route preview progress"
-            style={progressStyle}
-          >
-            <div className="progress-dial-inner">
-              <strong>{progress}</strong>
-              <span>percent</span>
-            </div>
+      <section className="simple-loading" aria-labelledby="analysis-title">
+        <div className="loading-atmosphere" aria-hidden="true" />
+        <div
+          className="simple-progress"
+          id="analysis-progress"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={progress}
+          aria-label="Route preview progress"
+          style={progressStyle}
+        >
+          <div className="simple-progress-core">
+            <strong>{progress}</strong>
+            <span>%</span>
           </div>
-
-          <div className="analysis-status">
-            <div className="status-heading">
-              <span>Preview sequence</span>
-              <strong aria-live="polite">
-                {progress === 100 ? "Preview ready" : stages[activeStage]}
-              </strong>
-            </div>
-            <ol className="stage-list">
-              {stages.map((stage, index) => {
-                const state = progress === 100 || index < activeStage
-                  ? "complete"
-                  : index === activeStage
-                    ? "active"
-                    : "pending";
-                return (
-                  <li className={state} key={stage}>
-                    <span>{String(index + 1).padStart(2, "0")}</span>
-                    <strong>{stage}</strong>
-                    <i aria-hidden="true" />
-                  </li>
-                );
-              })}
-            </ol>
-          </div>
+          <i className="progress-orbit orbit-a" aria-hidden="true" />
+          <i className="progress-orbit orbit-b" aria-hidden="true" />
         </div>
 
-        <div className="analysis-actions">
-          <Link href="/" className="quiet-link">Cancel preview</Link>
-          {progress === 100 ? (
-            <Link className="primary-action" href="/results" autoFocus>
-              View results now <span aria-hidden="true">↗</span>
-            </Link>
-          ) : (
-            <button className="quiet-button" type="button" onClick={() => setProgress(100)}>
-              Skip animation
-            </button>
-          )}
+        <div className="simple-loading-copy">
+          <h1 id="analysis-title">{progress === 100 ? "Preview ready." : "Reading the route."}</h1>
+          <p aria-live="polite">{stage}</p>
         </div>
-        <p className="redirect-note">
-          {progress === 100
-            ? "Opening the result preview automatically…"
-            : "The result preview opens automatically at 100%."}
-        </p>
+
+        <div className="simple-loading-actions">
+          <TransitionLink href="/">Cancel</TransitionLink>
+        </div>
+
+        <p className="visually-hidden">Phase 1 is a visual simulation and does not analyse route data.</p>
       </section>
     </main>
   );
