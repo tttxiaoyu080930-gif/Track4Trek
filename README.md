@@ -11,6 +11,7 @@ Track4Trek is not affiliated with Garmin. It will not claim to calculate officia
 The project is now beyond the original visual-only prototype:
 
 - GPX files are parsed locally in the browser; no route file is uploaded to a Track4Trek server.
+- The landing page includes a lazy-loaded library of five real sample routes for users without a GPX file.
 - Route distance, ascent, descent, elevation range, required pace, vertical speed, elevation profile, and geographic segments are derived from the file.
 - The trip survey stores activity, target moving time, gender selection, age, body weight, height, and backpack weight in kilograms.
 - The result page renders the route on a real interactive 3D terrain map using MapLibre GL JS.
@@ -175,7 +176,7 @@ Primary academic sources:
 - Open-Meteo forecast fields (up to 16 days) and NASA POWER 2001–2020 monthly climatology, fetched for representative route coordinates
 - Weather indices are normalized, transparent proxies: heat, snow, storm, precipitation, atmospheric visibility, wind, UV and combined difficulty
 
-Only sampled route coordinates and elevations are sent to the weather providers; the GPX text remains in the user's browser. Monthly values are climatology, not a long-range forecast. Open-Meteo's forecast fields are aggregated across sampled points into route-wide daily rows; Pro also keeps a bounded set of hourly rows for inspection. NASA POWER does not provide a trail-visibility observation, so visibility and storm values are explicitly derived atmospheric proxies. Always check official forecasts and park notices before travelling.
+Only sampled route coordinates and elevations are sent to the weather providers; the GPX text remains in the user's browser. The public sample-library copies retain route coordinates and elevation only: creator identity, timestamps, waypoints, notes, and vendor extensions are removed before publication. Monthly values are climatology, not a long-range forecast. Open-Meteo's forecast fields are aggregated across sampled points into route-wide daily rows; Pro also keeps a bounded set of hourly rows for inspection. NASA POWER does not provide a trail-visibility observation, so visibility and storm values are explicitly derived atmospheric proxies. Always check official forecasts and park notices before travelling.
 
 ## Local development
 

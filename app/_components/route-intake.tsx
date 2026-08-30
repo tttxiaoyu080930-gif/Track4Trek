@@ -2,14 +2,15 @@
 
 import { DragEvent, FormEvent, useId, useState } from "react";
 import {
-  createSampleRoutePreview,
   parseGpxRoute,
   saveRoutePreview,
   type RoutePreview,
   type SurveyInput,
 } from "../_lib/route-data";
+import type { SampleRouteDefinition } from "../_lib/sample-routes";
 import { useLanguage } from "./language-system";
 import { usePageTransition } from "./page-transition";
+import { SampleLibrary } from "./sample-library";
 
 type IntakeError =
   | "gpx-only"
@@ -17,6 +18,7 @@ type IntakeError =
   | "invalid-gpx"
   | "too-few-points"
   | "invalid-survey"
+  | "sample-failed"
   | "analysis-failed";
 
 function formNumber(formData: FormData, name: string) {
@@ -27,14 +29,15 @@ function formNumber(formData: FormData, name: string) {
 
 export function RouteIntake() {
   const transitionTo = usePageTransition();
-  const { text } = useLanguage();
+  const { language, text } = useLanguage();
   const inputId = useId();
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState<IntakeError | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isReading, setIsReading] = useState(false);
   const [uploadedText, setUploadedText] = useState<string | null>(null);
-  const [useSample, setUseSample] = useState(false);
+  const [sourceKind, setSourceKind] = useState<RoutePreview["source"]["kind"]>("uploaded-gpx");
+  const [isSampleLibraryOpen, setIsSampleLibraryOpen] = useState(false);
 
   async function selectFile(file?: File) {
     if (!file) return;
@@ -48,10 +51,32 @@ export function RouteIntake() {
       const text = await file.text();
       setFileName(file.name);
       setUploadedText(text);
-      setUseSample(false);
+      setSourceKind("uploaded-gpx");
       setError(null);
     } catch {
       setError("read-failed");
+    } finally {
+      setIsReading(false);
+    }
+  }
+
+  async function selectSampleRoute(route: SampleRouteDefinition) {
+    setIsSampleLibraryOpen(false);
+    setIsReading(true);
+    setFileName("");
+    setUploadedText(null);
+    setError(null);
+
+    try {
+      const response = await fetch(route.assetPath);
+      if (!response.ok) throw new Error(`Sample request failed with ${response.status}`);
+
+      const routeText = await response.text();
+      setFileName(`${language === "zh" ? route.chineseName : route.englishName}.gpx`);
+      setUploadedText(routeText);
+      setSourceKind("sample");
+    } catch {
+      setError("sample-failed");
     } finally {
       setIsReading(false);
     }
@@ -110,9 +135,7 @@ export function RouteIntake() {
 
     let preview: RoutePreview;
     try {
-      preview = useSample
-        ? createSampleRoutePreview(survey)
-        : parseGpxRoute(fileName, uploadedText ?? "", survey);
+      preview = parseGpxRoute(fileName, uploadedText ?? "", survey, sourceKind);
     } catch (caughtError) {
       const message = caughtError instanceof Error ? caughtError.message : "";
       setError(
@@ -162,20 +185,21 @@ export function RouteIntake() {
       </div>
 
       <button
-        className="sample-route-link"
+        className="sample-library-trigger"
         type="button"
-        onClick={() => {
-          setFileName("Lantau_Ridge_sample.gpx");
-          setUploadedText(null);
-          setUseSample(true);
-          setError(null);
-        }}
+        aria-haspopup="dialog"
+        aria-controls="sample-library-dialog"
+        aria-expanded={isSampleLibraryOpen}
+        disabled={isReading}
+        onClick={() => setIsSampleLibraryOpen(true)}
       >
-        {text("Use sample", "使用示例路线")}
+        <span aria-hidden="true" />
+        {text("Sample library", "示例路线库")}
+        <small aria-hidden="true">05</small>
       </button>
-      <span className="intake-error" role="alert">
+      <span className="intake-error" role={isReading ? "status" : "alert"} aria-live="polite">
         {isReading
-          ? text("Reading GPX", "正在读取 GPX")
+          ? text("Loading route", "正在载入路线")
           : error === "gpx-only"
             ? text("GPX files only", "仅支持 GPX 文件")
             : error === "read-failed"
@@ -186,10 +210,19 @@ export function RouteIntake() {
                   ? text("This file needs at least two route points", "此文件至少需要两个路线点")
                   : error === "invalid-survey"
                     ? text("Check the trip and profile values", "请检查行程与个人资料数值")
-                    : error === "analysis-failed"
-                      ? text("This route could not be analysed", "无法分析此路线")
-                      : ""}
+                    : error === "sample-failed"
+                      ? text("Could not load this sample route", "无法载入此示例路线")
+                      : error === "analysis-failed"
+                        ? text("This route could not be analysed", "无法分析此路线")
+                        : ""}
       </span>
+
+      <SampleLibrary
+        open={isSampleLibraryOpen}
+        disabled={isReading}
+        onClose={() => setIsSampleLibraryOpen(false)}
+        onSelect={(route) => void selectSampleRoute(route)}
+      />
 
       {fileName && (
         <div className="survey-scrim" role="dialog" aria-modal="true" aria-labelledby="trip-setup-title">

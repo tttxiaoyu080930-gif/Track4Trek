@@ -100,6 +100,48 @@ test("trip survey stores a numeric personal profile without a date field", async
   assert.match(globalStyles, /\.minimal-drop::before[\s\S]*?pointer-events:\s*none/);
 });
 
+test("sample library exposes five sanitized, parser-ready routes", async () => {
+  const intakeSource = await readFile(
+    new URL("../app/_components/route-intake.tsx", import.meta.url),
+    "utf8",
+  );
+  const sampleManifest = await readFile(
+    new URL("../app/_lib/sample-routes.ts", import.meta.url),
+    "utf8",
+  );
+  const sampleAssets = [
+    "langta-cv.gpx",
+    "lingbai-route.gpx",
+    "wusun-ancient-trail.gpx",
+    "mount-wutai-circuit.gpx",
+    "everest-east-slope.gpx",
+  ];
+
+  assert.doesNotMatch(intakeSource, /createSampleRoutePreview/);
+  assert.match(intakeSource, /parseGpxRoute\(fileName, uploadedText \?\? "", survey, sourceKind\)/);
+  assert.match(intakeSource, /setSourceKind\("sample"\)/);
+
+  for (const asset of sampleAssets) {
+    assert.match(sampleManifest, new RegExp(`/samples/${asset.replaceAll(".", "\\.")}`));
+    const gpx = await readFile(new URL(`../public/samples/${asset}`, import.meta.url), "utf8");
+    const pointCount = (gpx.match(/<(?:trkpt|rtept)\b/g) ?? []).length;
+
+    assert.ok(pointCount >= 2, `${asset} needs at least two route points`);
+    assert.match(gpx, /<ele>/, `${asset} should preserve route elevation`);
+    assert.doesNotMatch(
+      gpx,
+      /Creater|OriginCreater|<wpt\b|<time>|<extensions\b|<desc>|<cmt>|<sym>|<link\b/i,
+      `${asset} contains metadata that should not be public`,
+    );
+  }
+
+  const everest = await readFile(
+    new URL("../public/samples/everest-east-slope.gpx", import.meta.url),
+    "utf8",
+  );
+  assert.match(everest, /<rtept\b/);
+});
+
 test("server-renders the Track4Trek homepage", async () => {
   const response = await render();
   assert.equal(response.status, 200);
@@ -110,7 +152,13 @@ test("server-renders the Track4Trek homepage", async () => {
   assert.match(html, /Know what the trail asks\./i);
   assert.match(html, /Terrain, effort and conditions/i);
   assert.match(html, /Choose a GPX route file/i);
-  assert.match(html, /Use sample/i);
+  assert.match(html, /Sample library/i);
+  assert.match(html, /Langta C\+V/i);
+  assert.match(html, /Lingbai Route/i);
+  assert.match(html, /Wusun Ancient Trail/i);
+  assert.match(html, /Mount Wutai Circuit/i);
+  assert.match(html, /Everest East Slope/i);
+  assert.match(html, /More routes coming soon/i);
   assert.match(html, /Upload and analyse a route/i);
   assert.match(html, /Use light mode/i);
   assert.match(html, /role="group" aria-label="Language"/i);

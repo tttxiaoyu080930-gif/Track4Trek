@@ -367,7 +367,12 @@ function buildStats(segments: RoutePoint[][], survey: SurveyInput): RoutePreview
   };
 }
 
-export function parseGpxRoute(fileName: string, gpxText: string, survey: SurveyInput): RoutePreview {
+export function parseGpxRoute(
+  fileName: string,
+  gpxText: string,
+  survey: SurveyInput,
+  sourceKind: RoutePreview["source"]["kind"] = "uploaded-gpx",
+): RoutePreview {
   const document = new DOMParser().parseFromString(gpxText, "application/xml");
   const parseError = document.getElementsByTagName("parsererror")[0];
   if (parseError) {
@@ -412,7 +417,7 @@ export function parseGpxRoute(fileName: string, gpxText: string, survey: SurveyI
     createdAt: new Date().toISOString(),
     survey,
     source: {
-      kind: "uploaded-gpx",
+      kind: sourceKind,
       pointCount: points.length,
       trackCount: trackElements.length,
       segmentCount: segments.length,
@@ -424,40 +429,6 @@ export function parseGpxRoute(fileName: string, gpxText: string, survey: SurveyI
     mapPath: normalizeForPreview(previewSegment),
     elevationProfile: buildElevationProfile(segments),
     geographicSegments: buildGeographicSegments(segments),
-  };
-}
-
-export function createSampleRoutePreview(survey: SurveyInput): RoutePreview {
-  const points: RoutePoint[] = [
-    { latitude: 22.2522, longitude: 113.8829, elevation: 340, time: null },
-    { latitude: 22.2551, longitude: 113.8876, elevation: 420, time: null },
-    { latitude: 22.2593, longitude: 113.8924, elevation: 575, time: null },
-    { latitude: 22.264, longitude: 113.8996, elevation: 760, time: null },
-    { latitude: 22.2671, longitude: 113.9051, elevation: 934, time: null },
-    { latitude: 22.2705, longitude: 113.9113, elevation: 820, time: null },
-    { latitude: 22.2742, longitude: 113.9182, elevation: 650, time: null },
-    { latitude: 22.2784, longitude: 113.9256, elevation: 480, time: null },
-    { latitude: 22.2821, longitude: 113.9324, elevation: 360, time: null },
-  ];
-
-  return {
-    version: 3,
-    fileName: "Lantau_Ridge_sample.gpx",
-    createdAt: new Date().toISOString(),
-    survey,
-    source: {
-      kind: "sample",
-      pointCount: points.length,
-      trackCount: 1,
-      segmentCount: 1,
-      waypointCount: 0,
-      hasElevation: true,
-      hasTime: false,
-    },
-    stats: buildStats([points], survey),
-    mapPath: normalizeForPreview(points),
-    elevationProfile: buildElevationProfile([points]),
-    geographicSegments: buildGeographicSegments([points]),
   };
 }
 
