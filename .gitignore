@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/qa_render/
 
 # next.js
 /.next/
@@ -41,3 +42,6 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# generated browser runtime copied from installed dependencies
+/public/maplibre/

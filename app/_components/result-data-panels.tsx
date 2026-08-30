@@ -35,7 +35,7 @@ type DataPanelProps = {
 const routeGroups: readonly DataGroup[] = [
   {
     title: "Uploaded GPX",
-    source: "GPX 1.1 + gpxjs",
+    source: "GPX 1.1 + browser XML parser",
     items: [
       {
         name: "Route geometry",
@@ -77,7 +77,7 @@ const routeGroups: readonly DataGroup[] = [
   },
   {
     title: "Route profile",
-    source: "gpxjs + Turf.js",
+    source: "Track4Trek parser + Turf.js later",
     items: [
       {
         name: "Distance",
@@ -125,7 +125,7 @@ const routeGroups: readonly DataGroup[] = [
   },
   {
     title: "Terrain and map context",
-    source: "Open-Meteo Elevation + MapLibre + OpenFreeMap",
+    source: "Open-Meteo Elevation + MapLibre + OpenStreetMap",
     items: [
       {
         name: "DEM elevation samples",
@@ -362,7 +362,7 @@ const routeSources: readonly SourceLink[] = [
   { label: "GPX 1.1", href: "https://www.topografix.com/gpx/1/1/" },
   { label: "Turf.js", href: "https://turfjs.org/docs/" },
   { label: "MapLibre GL JS", href: "https://maplibre.org/maplibre-gl-js/docs/" },
-  { label: "OpenFreeMap", href: "https://openfreemap.org/quick_start/" },
+  { label: "OpenStreetMap", href: "https://www.openstreetmap.org/copyright" },
   { label: "OpenMapTiles schema", href: "https://openmaptiles.org/schema/" },
   { label: "Open-Meteo Elevation", href: "https://open-meteo.com/en/docs/elevation-api" },
 ];
@@ -457,7 +457,7 @@ export function RouteDataPanel() {
       introduction="Raw GPX fields, reproducible geometry calculations, elevation enrichment and the trip choices that shape the analysis."
       groups={routeGroups}
       sources={routeSources}
-      note="Availability means the field can be read or calculated by the planned Phase 2 pipeline. Most GPX fields are optional, timestamps and sensor extensions may be absent, and disconnected segments must not be joined across recording gaps. Distance is horizontal and elevation will be smoothed before ascent or grade is reported. OpenFreeMap context comes only from loaded cartographic tiles, not live closures or routing. Personal metadata stays hidden by default."
+      note="Availability means the field can be read or calculated by the planned Phase 2 pipeline. Most GPX fields are optional, timestamps and sensor extensions may be absent, and disconnected segments must not be joined across recording gaps. Distance is horizontal and elevation will be smoothed before ascent or grade is reported. OpenStreetMap context comes only from loaded cartographic tiles, not live closures or routing. Personal metadata stays hidden by default."
     />
   );
 }

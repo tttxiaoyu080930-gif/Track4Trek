@@ -1,34 +1,131 @@
 "use client";
 
 import { DragEvent, FormEvent, useId, useState } from "react";
+import {
+  createSampleRoutePreview,
+  parseGpxRoute,
+  saveRoutePreview,
+  type RoutePreview,
+  type SurveyInput,
+} from "../_lib/route-data";
+import { useLanguage } from "./language-system";
 import { usePageTransition } from "./page-transition";
+
+type IntakeError =
+  | "gpx-only"
+  | "read-failed"
+  | "invalid-gpx"
+  | "too-few-points"
+  | "invalid-survey"
+  | "analysis-failed";
+
+function formNumber(formData: FormData, name: string) {
+  const value = Number(formData.get(name));
+  if (!Number.isFinite(value)) throw new Error(`Invalid survey value: ${name}`);
+  return value;
+}
 
 export function RouteIntake() {
   const transitionTo = usePageTransition();
+  const { text } = useLanguage();
   const inputId = useId();
   const [fileName, setFileName] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<IntakeError | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isReading, setIsReading] = useState(false);
+  const [uploadedText, setUploadedText] = useState<string | null>(null);
+  const [useSample, setUseSample] = useState(false);
 
-  function selectFile(file?: File) {
+  async function selectFile(file?: File) {
     if (!file) return;
     if (!file.name.toLowerCase().endsWith(".gpx")) {
-      setError("GPX files only");
+      setError("gpx-only");
       return;
     }
 
-    setFileName(file.name);
-    setError("");
+    try {
+      setIsReading(true);
+      const text = await file.text();
+      setFileName(file.name);
+      setUploadedText(text);
+      setUseSample(false);
+      setError(null);
+    } catch {
+      setError("read-failed");
+    } finally {
+      setIsReading(false);
+    }
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setIsDragging(false);
-    selectFile(event.dataTransfer.files[0]);
+    void selectFile(event.dataTransfer.files[0]);
   }
 
   function beginPreview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    let survey: SurveyInput;
+
+    try {
+      survey = {
+        activity: String(formData.get("activity") ?? "day-hike") as SurveyInput["activity"],
+        sex: String(formData.get("sex") ?? "") as SurveyInput["sex"],
+        ageYears: formNumber(formData, "ageYears"),
+        bodyWeightKg: formNumber(formData, "bodyWeightKg"),
+        heightCm: formNumber(formData, "heightCm"),
+        packWeightKg: formNumber(formData, "packWeightKg"),
+        movingHours: formNumber(formData, "movingHours"),
+        movingMinutes: formNumber(formData, "movingMinutes"),
+      };
+
+      if (
+        !["day-hike", "trail-run", "backpacking"].includes(survey.activity) ||
+        !["male", "female"].includes(survey.sex) ||
+        !Number.isInteger(survey.ageYears) ||
+        survey.ageYears < 13 ||
+        survey.ageYears > 100 ||
+        survey.bodyWeightKg < 30 ||
+        survey.bodyWeightKg > 250 ||
+        survey.heightCm < 120 ||
+        survey.heightCm > 230 ||
+        survey.packWeightKg < 0 ||
+        survey.packWeightKg > 60 ||
+        !Number.isInteger(survey.movingHours) ||
+        survey.movingHours < 0 ||
+        survey.movingHours > 48 ||
+        !Number.isInteger(survey.movingMinutes) ||
+        survey.movingMinutes < 0 ||
+        survey.movingMinutes > 59 ||
+        survey.movingHours * 60 + survey.movingMinutes < 1 ||
+        survey.movingHours * 60 + survey.movingMinutes > 48 * 60
+      ) {
+        throw new Error("Survey values are outside the supported range.");
+      }
+    } catch {
+      setError("invalid-survey");
+      return;
+    }
+
+    let preview: RoutePreview;
+    try {
+      preview = useSample
+        ? createSampleRoutePreview(survey)
+        : parseGpxRoute(fileName, uploadedText ?? "", survey);
+    } catch (caughtError) {
+      const message = caughtError instanceof Error ? caughtError.message : "";
+      setError(
+        message.includes("at least two")
+          ? "too-few-points"
+          : message.includes("could not be read")
+            ? "invalid-gpx"
+            : "analysis-failed",
+      );
+      return;
+    }
+
+    saveRoutePreview(preview);
     transitionTo("/analyzing");
   }
 
@@ -51,14 +148,16 @@ export function RouteIntake() {
             <b />
             <em />
           </span>
-          <span className="visually-hidden">Choose a GPX route file</span>
+          <span className="visually-hidden">
+            {text("Choose a GPX route file", "选择 GPX 路线文件")}
+          </span>
         </label>
         <input
           className="visually-hidden"
           id={inputId}
           type="file"
           accept=".gpx,application/gpx+xml"
-          onChange={(event) => selectFile(event.target.files?.[0])}
+          onChange={(event) => void selectFile(event.target.files?.[0])}
         />
       </div>
 
@@ -67,25 +166,43 @@ export function RouteIntake() {
         type="button"
         onClick={() => {
           setFileName("Lantau_Ridge_sample.gpx");
-          setError("");
+          setUploadedText(null);
+          setUseSample(true);
+          setError(null);
         }}
       >
-        Use sample
+        {text("Use sample", "使用示例路线")}
       </button>
-      <span className="intake-error" role="alert">{error}</span>
+      <span className="intake-error" role="alert">
+        {isReading
+          ? text("Reading GPX", "正在读取 GPX")
+          : error === "gpx-only"
+            ? text("GPX files only", "仅支持 GPX 文件")
+            : error === "read-failed"
+              ? text("Could not read this file", "无法读取此文件")
+              : error === "invalid-gpx"
+                ? text("This GPX file could not be read", "无法解析此 GPX 文件")
+                : error === "too-few-points"
+                  ? text("This file needs at least two route points", "此文件至少需要两个路线点")
+                  : error === "invalid-survey"
+                    ? text("Check the trip and profile values", "请检查行程与个人资料数值")
+                    : error === "analysis-failed"
+                      ? text("This route could not be analysed", "无法分析此路线")
+                      : ""}
+      </span>
 
       {fileName && (
         <div className="survey-scrim" role="dialog" aria-modal="true" aria-labelledby="trip-setup-title">
           <form className="survey-glass" onSubmit={beginPreview}>
             <div className="survey-topline">
               <div>
-                <span>Trip setup</span>
-                <h2 id="trip-setup-title">Set the attempt.</h2>
+                <span>{text("Trip setup", "行程设置")}</span>
+                <h2 id="trip-setup-title">{text("Set the attempt.", "设定本次行程。")}</h2>
               </div>
               <button
                 className="survey-close"
                 type="button"
-                aria-label="Close trip setup"
+                aria-label={text("Close trip setup", "关闭行程设置")}
                 onClick={() => setFileName("")}
               >
                 ×
@@ -94,50 +211,98 @@ export function RouteIntake() {
 
             <p className="selected-route">{fileName}</p>
 
-            <fieldset className="survey-fieldset compact-fieldset">
-              <legend>Activity</legend>
-              <div className="choice-row">
-                {[
-                  ["day-hike", "Hike"],
-                  ["trail-run", "Run"],
-                  ["backpacking", "Backpack"],
-                ].map(([value, label], index) => (
-                  <label key={value}>
-                    <input type="radio" name="activity" value={value} defaultChecked={index === 0} />
-                    <span>{label}</span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
+            <div className="survey-choice-groups">
+              <fieldset className="survey-fieldset compact-fieldset">
+                <legend>{text("Activity", "活动类型")}</legend>
+                <div className="choice-row">
+                  {[
+                    ["day-hike", text("Hike", "徒步")],
+                    ["trail-run", text("Run", "越野跑")],
+                    ["backpacking", text("Backpack", "背包徒步")],
+                  ].map(([value, label], index) => (
+                    <label key={value}>
+                      <input type="radio" name="activity" value={value} defaultChecked={index === 0} />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              <fieldset className="survey-fieldset compact-fieldset">
+                <legend>{text("Gender", "性别")}</legend>
+                <div className="choice-row">
+                  {[
+                    ["male", text("Male", "男")],
+                    ["female", text("Female", "女")],
+                  ].map(([value, label], index) => (
+                    <label key={value}>
+                      <input
+                        type="radio"
+                        name="sex"
+                        value={value}
+                        defaultChecked={index === 0}
+                        required
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            </div>
 
             <div className="survey-grid compact-grid">
-              <label className="survey-control">
-                <span>Moving time</span>
+              <label className="survey-control survey-time-control">
+                <span>{text("Moving time", "预计移动时间")}</span>
                 <span className="time-inputs">
-                  <input aria-label="Moving time hours" type="number" min="0" max="48" defaultValue="7" />
-                  <small>hr</small>
-                  <input aria-label="Moving time minutes" type="number" min="0" max="59" defaultValue="0" />
-                  <small>min</small>
+                  <input aria-label={text("Moving time hours", "移动时间（小时）")} name="movingHours" type="number" min="0" max="48" defaultValue="7" required />
+                  <small>{text("hr", "时")}</small>
+                  <input aria-label={text("Moving time minutes", "移动时间（分钟）")} name="movingMinutes" type="number" min="0" max="59" defaultValue="0" required />
+                  <small>{text("min", "分")}</small>
                 </span>
               </label>
 
               <label className="survey-control">
-                <span>Pack</span>
-                <select defaultValue="moderate">
-                  <option value="light">Light</option>
-                  <option value="moderate">Moderate</option>
-                  <option value="heavy">Heavy</option>
-                </select>
+                <span>{text("Pack weight", "背包重量")}</span>
+                <span className="measurement-input">
+                  <input aria-label={text("Pack weight in kilograms", "背包重量（公斤）")} name="packWeightKg" type="number" min="0" max="60" step="0.1" defaultValue="5" required />
+                  <small>{text("kg", "公斤")}</small>
+                </span>
               </label>
 
               <label className="survey-control">
-                <span>Date</span>
-                <input type="date" defaultValue="2026-10-18" />
+                <span>{text("Age", "年龄")}</span>
+                <span className="measurement-input">
+                  <input aria-label={text("Age in years", "年龄（岁）")} name="ageYears" type="number" min="13" max="100" step="1" defaultValue="25" required />
+                  <small>{text("yr", "岁")}</small>
+                </span>
+              </label>
+
+              <label className="survey-control">
+                <span>{text("Body weight", "体重")}</span>
+                <span className="measurement-input">
+                  <input aria-label={text("Body weight in kilograms", "体重（公斤）")} name="bodyWeightKg" type="number" min="30" max="250" step="0.1" defaultValue="70" required />
+                  <small>{text("kg", "公斤")}</small>
+                </span>
+              </label>
+
+              <label className="survey-control">
+                <span>{text("Height", "身高")}</span>
+                <span className="measurement-input">
+                  <input aria-label={text("Height in centimeters", "身高（厘米）")} name="heightCm" type="number" min="120" max="230" step="1" defaultValue="170" required />
+                  <small>{text("cm", "厘米")}</small>
+                </span>
               </label>
             </div>
 
+            <p className="survey-privacy-note">
+              {text(
+                "Profile values stay in this browser and support the planned route-demand estimates.",
+                "个人资料只保存在此浏览器中，用于后续路线需求估算。",
+              )}
+            </p>
+
             <button className="primary-action survey-submit" type="submit">
-              Begin preview <span aria-hidden="true">↗</span>
+              {text("Begin preview", "开始预览")} <span aria-hidden="true">↗</span>
             </button>
           </form>
         </div>

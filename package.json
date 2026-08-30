@@ -6,16 +6,20 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "predev": "node ./scripts/copy-maplibre-worker.mjs",
     "dev": "vinext dev",
+    "prebuild": "node ./scripts/copy-maplibre-worker.mjs",
     "build": "vinext build",
+    "prebuild:vercel": "node ./scripts/copy-maplibre-worker.mjs",
     "build:vercel": "next build",
     "start": "vinext start",
-    "test": "pnpm run build && node --test tests/rendered-html.test.mjs",
+    "test": "pnpm run build && node --test tests/route-demand.test.mjs tests/pro-route-analysis.test.mjs tests/weather-model.test.mjs tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
+    "maplibre-contour": "0.1.0",
     "maplibre-gl": "6.2.0",
     "next": "16.2.6",
     "react": "19.2.6",

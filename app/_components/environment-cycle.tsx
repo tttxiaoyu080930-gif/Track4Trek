@@ -1,70 +1,93 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { THEME_CHANGE_EVENT, type Track4TrekTheme } from "./theme-system";
 
-const LANDSCAPE_SCENES = [
-  { src: "/result-bg-alpine-hd.webp", contourPalette: "Lime" },
-  { src: "/result-bg-snow-hd.webp", contourPalette: "Ink" },
-  { src: "/result-bg-forest-hd.webp", contourPalette: "Ice" },
-  { src: "/result-bg-mist-hd.webp", contourPalette: "Amber" },
-  { src: "/result-bg-jungle-hd.webp", contourPalette: "Magenta" },
-  { src: "/result-bg-autumn-hd.webp", contourPalette: "Ice" },
-  { src: "/result-bg-coast-hd.webp", contourPalette: "Amber" },
-  { src: "/result-bg-ocean-hd.webp", contourPalette: "Ink" },
-  { src: "/result-bg-desert-hd.webp", contourPalette: "Ink" },
-  { src: "/result-bg-canyon-hd.webp", contourPalette: "Ink" },
-  { src: "/result-bg-volcano-hd.webp", contourPalette: "Lime" },
-  { src: "/result-bg-highland-hd.webp", contourPalette: "Ink" },
-] as const;
+type ResultScene = "terrain" | "metrics" | "elevation" | "weather" | "activity" | "notes";
+
+const RESULT_SCENES = [
+  { selector: "#terrain-result", scene: "terrain" },
+  { selector: "#route-data", scene: "terrain" },
+  { selector: "#metrics", scene: "metrics" },
+  { selector: "#elevation", scene: "elevation" },
+  { selector: "#weather", scene: "weather" },
+  { selector: "#weather-data", scene: "weather" },
+  { selector: "#post-activity", scene: "activity" },
+  { selector: "#result-notes", scene: "notes" },
+] as const satisfies ReadonlyArray<{ selector: string; scene: ResultScene }>;
 
 const LANDSCAPE_CHANGE_EVENT = "track4trek:landscape-change";
 
+function currentTheme(): Track4TrekTheme {
+  return document.documentElement.dataset.track4trekTheme === "light" ? "light" : "dark";
+}
+
+function publishScene(scene: ResultScene) {
+  const theme = currentTheme();
+  const contourPalette = theme === "light" ? "Ink" : "Lime";
+  document.documentElement.dataset.track4trekScene = scene;
+  document.documentElement.dataset.track4trekContour = contourPalette;
+  window.dispatchEvent(new CustomEvent(LANDSCAPE_CHANGE_EVENT, {
+    detail: { contourPalette, scene, theme },
+  }));
+}
+
 export function EnvironmentCycle() {
-  const [frame, setFrame] = useState<{ currentIndex: number; previousIndex: number | null }>({
-    currentIndex: 0,
-    previousIndex: null,
-  });
-
   useEffect(() => {
-    const nextImage = new Image();
-    nextImage.src = LANDSCAPE_SCENES[(frame.currentIndex + 1) % LANDSCAPE_SCENES.length].src;
-  }, [frame.currentIndex]);
+    const targets = RESULT_SCENES.flatMap(({ selector, scene }) => {
+      const element = document.querySelector<HTMLElement>(selector);
+      return element ? [{ element, scene }] : [];
+    });
+    let activeScene: ResultScene | null = null;
+    let animationFrame: number | null = null;
 
-  useEffect(() => {
-    const scene = LANDSCAPE_SCENES[frame.currentIndex];
-    document.documentElement.dataset.track4trekContour = scene.contourPalette;
-    window.dispatchEvent(new CustomEvent(LANDSCAPE_CHANGE_EVENT, {
-      detail: { contourPalette: scene.contourPalette },
-    }));
-  }, [frame.currentIndex]);
+    const updateScene = (force = false) => {
+      const focusLine = window.innerHeight * 0.46;
+      const nearest = targets.reduce<{
+        scene: ResultScene;
+        distance: number;
+      } | null>((selected, target) => {
+        const bounds = target.element.getBoundingClientRect();
+        const distance =
+          focusLine < bounds.top
+            ? bounds.top - focusLine
+            : focusLine > bounds.bottom
+              ? focusLine - bounds.bottom
+              : 0;
 
-  useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        return selected == null || distance < selected.distance
+          ? { scene: target.scene, distance }
+          : selected;
+      }, null);
+      const nextScene = nearest?.scene ?? "terrain";
 
-    const interval = window.setInterval(() => {
-      setFrame(({ currentIndex }) => ({
-        previousIndex: currentIndex,
-        currentIndex: (currentIndex + 1) % LANDSCAPE_SCENES.length,
-      }));
-    }, 7000);
+      if (force || nextScene !== activeScene) {
+        activeScene = nextScene;
+        publishScene(nextScene);
+      }
+    };
 
-    return () => window.clearInterval(interval);
+    const scheduleUpdate = () => {
+      if (animationFrame !== null) return;
+      animationFrame = window.requestAnimationFrame(() => {
+        animationFrame = null;
+        updateScene();
+      });
+    };
+
+    const handleThemeChange = () => updateScene(true);
+    updateScene(true);
+    window.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+    window.addEventListener(THEME_CHANGE_EVENT, handleThemeChange);
+
+    return () => {
+      window.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+      window.removeEventListener(THEME_CHANGE_EVENT, handleThemeChange);
+      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
+    };
   }, []);
 
-  return (
-    <div className="environment-cycle" aria-hidden="true">
-      {frame.previousIndex !== null ? (
-        <i
-          className="environment-scene environment-scene-previous"
-          key={`previous-${frame.previousIndex}`}
-          style={{ backgroundImage: `url("${LANDSCAPE_SCENES[frame.previousIndex].src}")` }}
-        />
-      ) : null}
-      <i
-        className="environment-scene environment-scene-current"
-        key={`current-${frame.currentIndex}`}
-        style={{ backgroundImage: `url("${LANDSCAPE_SCENES[frame.currentIndex].src}")` }}
-      />
-    </div>
-  );
+  return null;
 }

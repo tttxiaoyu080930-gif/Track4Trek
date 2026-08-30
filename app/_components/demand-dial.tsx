@@ -1,6 +1,8 @@
 import type { CSSProperties } from "react";
+import { useLanguage } from "./language-system";
 
-type DemandDialProps = {
+export type DemandDialProps = {
+  metricId: string;
   label: string;
   range: string;
   descriptor: string;
@@ -9,39 +11,55 @@ type DemandDialProps = {
   tone?: "orange" | "gold" | "lime" | "cyan" | "magenta";
   unit?: string;
   reason: string;
+  estimateStatus?: "loading" | "missing" | "estimated" | "outside-model" | "unavailable";
 };
 
 export function DemandDial({
+  metricId,
   label,
   range,
   descriptor,
   start,
   end,
   tone = "orange",
-  unit = "Suggested range",
+  unit,
   reason,
+  estimateStatus = "estimated",
 }: DemandDialProps) {
+  const { text } = useLanguage();
+  const displayedUnit = unit ?? text("Suggested range", "建议范围");
+  const safeStart = Number.isFinite(start) ? Math.min(Math.max(start, 0), 100) : 0;
+  const safeEnd = Number.isFinite(end) ? Math.min(Math.max(end, safeStart), 100) : safeStart;
   const style = {
-    "--dial-angle": `${-135 + (end / 100) * 270}deg`,
-    "--dial-range-start-sweep": `${start * 2.7}deg`,
-    "--dial-range-end-sweep": `${end * 2.7}deg`,
+    "--dial-range-start-sweep": `${safeStart * 2.7}deg`,
+    "--dial-range-end-sweep": `${safeEnd * 2.7}deg`,
   } as CSSProperties;
 
   return (
-    <article className={`demand-card tone-${tone}`}>
+    <article
+      className={`demand-card tone-${tone}`}
+      data-metric-id={metricId}
+      data-estimate-status={estimateStatus}
+      data-range-value={range}
+      data-range-start={safeStart}
+      data-range-end={safeEnd}
+      aria-busy={estimateStatus === "loading" ? true : undefined}
+    >
       <div className="watch-demand-dial" style={style} aria-hidden="true">
         <div className="dial-segments" />
         <div className="watch-range-indicator" />
-        <i className="watch-score-marker" />
         <div className="watch-face">
           <span className="watch-label">{label}</span>
           <span className="watch-range">{range}</span>
           <strong className="watch-descriptor">{descriptor}</strong>
-          <span className="watch-unit">{unit}</span>
+          <span className="watch-unit">{displayedUnit}</span>
         </div>
       </div>
       <p className="visually-hidden">
-        {label}: recommended range {range}, {descriptor}. {reason}
+        {text(
+          `${label}: recommended range ${range}, ${descriptor}. ${reason}`,
+          `${label}：建议范围为 ${range}，等级为${descriptor}。${reason}`,
+        )}
       </p>
     </article>
   );

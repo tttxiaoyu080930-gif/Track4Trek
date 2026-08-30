@@ -1,6 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  readRoutePreview,
+  type PreviewGeographicPoint,
+  type PreviewMapPoint,
+  type RoutePreview,
+} from "../_lib/route-data";
+import { useLanguage, type Track4TrekLanguage } from "./language-system";
+import {
+  MapLibreTerrainMap,
+  type TerrainDisplayMode,
+  type TerrainMapStatus,
+} from "./maplibre-terrain-map";
 
 type TerrainPoint = { x: number; y: number; z: number };
 type ScreenPoint = { x: number; y: number };
@@ -11,77 +24,148 @@ type ContourPalette = {
   high: readonly [number, number, number];
   outline: readonly [number, number, number];
 };
+type VisualRoutePoint = { x: number; y: number; elevation: number | null };
+type RouteFact = { label: string; value: string; unit: string };
 
-const contourPalettes = {
-  Lime: { name: "Lime", low: [96, 180, 72], high: [226, 255, 123], outline: [2, 18, 31] },
-  Ice: { name: "Ice", low: [62, 175, 224], high: [197, 247, 255], outline: [2, 17, 32] },
-  Amber: { name: "Amber", low: [232, 126, 43], high: [255, 238, 104], outline: [25, 12, 2] },
-  Magenta: { name: "Magenta", low: [226, 59, 168], high: [255, 190, 239], outline: [24, 4, 29] },
-  Ink: { name: "Ink", low: [4, 24, 52], high: [8, 83, 140], outline: [245, 252, 255] },
-} as const satisfies Record<string, ContourPalette>;
+const FIXED_CONTOUR_PALETTE: ContourPalette = {
+  name: "Glacier slate",
+  low: [44, 112, 139],
+  high: [178, 226, 229],
+  outline: [7, 24, 34],
+};
 
-const LANDSCAPE_CHANGE_EVENT = "track4trek:landscape-change";
 const HIGHEST_ALTITUDE_METERS = 934;
 const LOWEST_ALTITUDE_METERS = 340;
 const terrainPeak: TerrainPoint = { x: -0.034, y: -0.095, z: 1.03 };
 
-function resolveContourPalette(name: unknown): ContourPalette {
-  if (typeof name === "string" && name in contourPalettes) {
-    return contourPalettes[name as keyof typeof contourPalettes];
-  }
-  return contourPalettes.Lime;
+const fallbackRoutePath: VisualRoutePoint[] = [
+  { x: -0.88, y: 0.62, elevation: 340 },
+  { x: -0.72, y: 0.48, elevation: 420 },
+  { x: -0.57, y: 0.31, elevation: 520 },
+  { x: -0.45, y: 0.14, elevation: 620 },
+  { x: -0.29, y: 0.04, elevation: 710 },
+  { x: -0.12, y: -0.12, elevation: 934 },
+  { x: 0.03, y: -0.27, elevation: 820 },
+  { x: 0.2, y: -0.31, elevation: 710 },
+  { x: 0.36, y: -0.43, elevation: 590 },
+  { x: 0.53, y: -0.55, elevation: 470 },
+  { x: 0.73, y: -0.68, elevation: 360 },
+];
+
+const fallbackGeographicSegments: PreviewGeographicPoint[][] = [[
+  { latitude: 22.2522, longitude: 113.8829, elevationM: 340 },
+  { latitude: 22.2551, longitude: 113.8876, elevationM: 420 },
+  { latitude: 22.2593, longitude: 113.8924, elevationM: 575 },
+  { latitude: 22.264, longitude: 113.8996, elevationM: 760 },
+  { latitude: 22.2671, longitude: 113.9051, elevationM: 934 },
+  { latitude: 22.2705, longitude: 113.9113, elevationM: 820 },
+  { latitude: 22.2742, longitude: 113.9182, elevationM: 650 },
+  { latitude: 22.2784, longitude: 113.9256, elevationM: 480 },
+  { latitude: 22.2821, longitude: 113.9324, elevationM: 360 },
+]];
+
+function formatDistance(value: number) {
+  return value >= 10 ? value.toFixed(0) : value.toFixed(1);
 }
 
-function blendColor(
-  from: readonly [number, number, number],
-  to: readonly [number, number, number],
-  progress: number,
-): [number, number, number] {
+function formatPace(minutesPerKm: number | null) {
+  if (minutesPerKm == null) return null;
+  const minutes = Math.floor(minutesPerKm);
+  const seconds = Math.round((minutesPerKm - minutes) * 60);
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function factLabel(language: Track4TrekLanguage, english: string, chinese: string) {
+  return language === "zh" ? chinese : english;
+}
+
+function fallbackRouteFacts(language: Track4TrekLanguage): RouteFact[] {
   return [
-    Math.round(from[0] + (to[0] - from[0]) * progress),
-    Math.round(from[1] + (to[1] - from[1]) * progress),
-    Math.round(from[2] + (to[2] - from[2]) * progress),
+    { label: factLabel(language, "Total distance", "总距离"), value: "4.7", unit: "km" },
+    {
+      label: factLabel(language, "Elevation range", "海拔范围"),
+      value: `${LOWEST_ALTITUDE_METERS}-${HIGHEST_ALTITUDE_METERS}`,
+      unit: "m",
+    },
+    { label: factLabel(language, "Total ascent", "累计爬升"), value: "+690", unit: "m" },
+    { label: factLabel(language, "Total descent", "累计下降"), value: "-640", unit: "m" },
+    {
+      label: factLabel(language, "Highest elevation", "最高海拔"),
+      value: String(HIGHEST_ALTITUDE_METERS),
+      unit: "m",
+    },
   ];
 }
 
-function blendContourPalette(
-  from: ContourPalette,
-  to: ContourPalette,
-  progress: number,
-): ContourPalette {
-  return {
-    name: to.name,
-    low: blendColor(from.low, to.low, progress),
-    high: blendColor(from.high, to.high, progress),
-    outline: blendColor(from.outline, to.outline, progress),
-  };
+function routeFactsFromPreview(
+  preview: RoutePreview | null,
+  language: Track4TrekLanguage,
+): RouteFact[] {
+  if (!preview) return fallbackRouteFacts(language);
+
+  const stats = preview.stats;
+  const unknown = language === "zh" ? "未知" : "unknown";
+  return [
+    {
+      label: factLabel(language, "Total distance", "总距离"),
+      value: formatDistance(stats.totalDistanceKm),
+      unit: "km",
+    },
+    {
+      label: factLabel(language, "Elevation range", "海拔范围"),
+      value:
+        stats.lowestElevationM == null || stats.highestElevationM == null
+          ? unknown
+          : `${stats.lowestElevationM}-${stats.highestElevationM}`,
+      unit: stats.lowestElevationM == null || stats.highestElevationM == null ? "" : "m",
+    },
+    {
+      label: factLabel(language, "Total ascent", "累计爬升"),
+      value: stats.totalAscentM == null ? unknown : `+${stats.totalAscentM}`,
+      unit: stats.totalAscentM == null ? "" : "m",
+    },
+    {
+      label: factLabel(language, "Total descent", "累计下降"),
+      value: stats.totalDescentM == null ? unknown : `-${stats.totalDescentM}`,
+      unit: stats.totalDescentM == null ? "" : "m",
+    },
+    {
+      label: factLabel(language, "Highest elevation", "最高海拔"),
+      value: stats.highestElevationM == null ? unknown : String(stats.highestElevationM),
+      unit: stats.highestElevationM == null ? "" : "m",
+    },
+    {
+      label: factLabel(language, "Required pace", "所需配速"),
+      value: formatPace(stats.requiredPaceMinPerKm) ?? unknown,
+      unit: stats.requiredPaceMinPerKm == null ? "" : "/km",
+    },
+  ];
 }
 
-const routeFacts = [
-  { label: "Total distance", value: "4.7", unit: "km" },
-  {
-    label: "Elevation range",
-    value: `${LOWEST_ALTITUDE_METERS}–${HIGHEST_ALTITUDE_METERS}`,
-    unit: "m",
-  },
-  { label: "Total ascent", value: "+690", unit: "m" },
-  { label: "Total descent", value: "−640", unit: "m" },
-  { label: "Highest elevation", value: String(HIGHEST_ALTITUDE_METERS), unit: "m" },
-] as const;
+function mapPathFromPreview(path: PreviewMapPoint[] | undefined): VisualRoutePoint[] {
+  return path != null && path.length >= 2 ? path : fallbackRoutePath;
+}
 
-const routePath = [
-  { x: -0.88, y: 0.62 },
-  { x: -0.72, y: 0.48 },
-  { x: -0.57, y: 0.31 },
-  { x: -0.45, y: 0.14 },
-  { x: -0.29, y: 0.04 },
-  { x: -0.12, y: -0.12 },
-  { x: 0.03, y: -0.27 },
-  { x: 0.2, y: -0.31 },
-  { x: 0.36, y: -0.43 },
-  { x: 0.53, y: -0.55 },
-  { x: 0.73, y: -0.68 },
-] as const;
+function geographicSegmentsFromPreview(
+  preview: RoutePreview | null,
+  previewLoaded: boolean,
+) {
+  if (!previewLoaded) return [];
+  const segments = preview?.geographicSegments?.filter((segment) => segment.length >= 2) ?? [];
+  if (segments.length) return segments;
+  if (!preview || preview.source.kind === "sample") return fallbackGeographicSegments;
+  return [];
+}
+
+function elevationPoint(points: VisualRoutePoint[], mode: "highest" | "lowest") {
+  const withElevation = points.filter((point) => point.elevation != null);
+  if (withElevation.length === 0) return null;
+
+  return withElevation.reduce((selected, point) => {
+    if (mode === "highest") return point.elevation! > selected.elevation! ? point : selected;
+    return point.elevation! < selected.elevation! ? point : selected;
+  }, withElevation[0]);
+}
 
 function terrainHeight(x: number, y: number) {
   const peak = 0.72 * Math.exp(-((x + 0.08) ** 2 * 4.6 + (y + 0.08) ** 2 * 7.4));
@@ -237,6 +321,7 @@ function drawElevationMarker(
   visibility: number,
   altitude: number,
   placement: "above" | "below-left",
+  unitLabel: string,
 ) {
   if (visibility <= 0) return;
 
@@ -262,8 +347,8 @@ function drawElevationMarker(
   context.textBaseline = isAbove ? "bottom" : "top";
   context.lineJoin = "round";
   context.lineWidth = 3.5;
-  context.strokeText(`${altitude} m`, labelX, labelY);
-  context.fillText(`${altitude} m`, labelX, labelY);
+  context.strokeText(`${altitude} ${unitLabel}`, labelX, labelY);
+  context.fillText(`${altitude} ${unitLabel}`, labelX, labelY);
   context.restore();
 }
 
@@ -273,6 +358,9 @@ function drawTerrain(
   elevationVisibility: number,
   yaw: number,
   palette: ContourPalette,
+  routePath: VisualRoutePoint[],
+  routePreview: RoutePreview | null,
+  language: Track4TrekLanguage,
 ) {
   canvas.dataset.rotation = yaw.toFixed(3);
   canvas.dataset.contourPalette = palette.name;
@@ -345,75 +433,133 @@ function drawTerrain(
   const activeRoute = pointAlongPath(projectedRoute, routeProgress);
 
   context.save();
-  context.beginPath();
-  context.moveTo(projectedRoute[0].x, projectedRoute[0].y);
-  for (let index = 1; index < projectedRoute.length; index += 1) {
-    context.lineTo(projectedRoute[index].x, projectedRoute[index].y);
-  }
-  context.setLineDash([4, 8]);
-  context.strokeStyle = "rgba(210, 235, 247, 0.19)";
-  context.lineWidth = 2;
-  context.stroke();
-  context.setLineDash([]);
-
-  const routeGradient = context.createLinearGradient(
-    projectedRoute[0].x,
-    projectedRoute[0].y,
-    projectedRoute.at(-1)!.x,
-    projectedRoute.at(-1)!.y,
-  );
-  routeGradient.addColorStop(0, "#5ce4ff");
-  routeGradient.addColorStop(0.45, "#ffd05f");
-  routeGradient.addColorStop(1, "#ff7448");
-
   traceRoute(context, projectedRoute, activeRoute.segmentIndex, activeRoute.segmentProgress);
-  context.strokeStyle = "rgba(255, 133, 67, 0.38)";
-  context.lineWidth = 18;
-  context.shadowBlur = 24;
-  context.shadowColor = "rgba(255, 119, 63, 0.72)";
-  context.stroke();
-
-  traceRoute(context, projectedRoute, activeRoute.segmentIndex, activeRoute.segmentProgress);
-  context.strokeStyle = routeGradient;
-  context.lineWidth = 5;
-  context.shadowBlur = 10;
+  context.strokeStyle = "#f0a35a";
+  context.lineWidth = 4.25;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.shadowBlur = 0;
   context.stroke();
   context.restore();
 
-  drawMarker(context, projectedRoute[0], "START", "#61dcff", "left");
-  drawMarker(context, projectedRoute.at(-1)!, "FINISH", "#ff874d", "right");
-  drawElevationMarker(
-    context,
-    project(terrainPeak, yaw, width, height),
-    elevationVisibility,
-    HIGHEST_ALTITUDE_METERS,
-    "above",
-  );
-  drawElevationMarker(
+  drawMarker(
     context,
     projectedRoute[0],
-    elevationVisibility,
-    LOWEST_ALTITUDE_METERS,
-    "below-left",
+    language === "zh" ? "起点" : "START",
+    "#61dcff",
+    "left",
   );
+  drawMarker(
+    context,
+    projectedRoute.at(-1)!,
+    language === "zh" ? "终点" : "FINISH",
+    "#ff874d",
+    "right",
+  );
+  const highestAltitude = routePreview
+    ? routePreview.stats.highestElevationM
+    : HIGHEST_ALTITUDE_METERS;
+  const lowestAltitude = routePreview
+    ? routePreview.stats.lowestElevationM
+    : LOWEST_ALTITUDE_METERS;
+  const highestRoutePoint = elevationPoint(routePath, "highest");
+  const lowestRoutePoint = elevationPoint(routePath, "lowest");
 
-  if (routeProgress < 0.995) {
-    context.save();
-    context.fillStyle = "#ffffff";
-    context.shadowBlur = 22;
-    context.shadowColor = "#ff8a4d";
-    context.beginPath();
-    context.arc(activeRoute.point.x, activeRoute.point.y, 4.5, 0, Math.PI * 2);
-    context.fill();
-    context.restore();
+  if (highestAltitude != null) {
+    drawElevationMarker(
+      context,
+      highestRoutePoint
+        ? project({
+            x: highestRoutePoint.x,
+            y: highestRoutePoint.y,
+            z: terrainHeight(highestRoutePoint.x, highestRoutePoint.y) + 0.06,
+          }, yaw, width, height)
+        : project(terrainPeak, yaw, width, height),
+      elevationVisibility,
+      highestAltitude,
+      "above",
+      language === "zh" ? "米" : "m",
+    );
   }
+  if (lowestAltitude != null) {
+    drawElevationMarker(
+      context,
+      lowestRoutePoint
+        ? project({
+            x: lowestRoutePoint.x,
+            y: lowestRoutePoint.y,
+            z: terrainHeight(lowestRoutePoint.x, lowestRoutePoint.y) + 0.045,
+          }, yaw, width, height)
+        : projectedRoute[0],
+      elevationVisibility,
+      lowestAltitude,
+      "below-left",
+      language === "zh" ? "米" : "m",
+    );
+  }
+
 }
 
 export function TrailMap() {
+  const { language, text } = useLanguage();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const languageRef = useRef(language);
+  const redrawTerrainRef = useRef<(() => void) | null>(null);
   const visualStateRef = useRef({ routeProgress: 0, elevationVisibility: 0, yaw: -0.48 });
-  const activePaletteRef = useRef<ContourPalette>(contourPalettes.Lime);
+  const activePaletteRef = useRef<ContourPalette>(FIXED_CONTOUR_PALETTE);
   const [presentationStage, setPresentationStage] = useState<"intro" | "detail">("intro");
+  const [routePreview, setRoutePreview] = useState<RoutePreview | null>(null);
+  const [routePreviewLoaded, setRoutePreviewLoaded] = useState(false);
+  const [realMapStatus, setRealMapStatus] = useState<TerrainMapStatus>("idle");
+  const [displayMode, setDisplayMode] = useState<TerrainDisplayMode>("contour");
+  const [mapAttempt, setMapAttempt] = useState(0);
+  const routePath = useMemo(
+    () => mapPathFromPreview(routePreview?.mapPath),
+    [routePreview],
+  );
+  const geographicSegments = useMemo(
+    () => geographicSegmentsFromPreview(routePreview, routePreviewLoaded),
+    [routePreview, routePreviewLoaded],
+  );
+  const hasRealMapData = geographicSegments.length > 0;
+  const routeFacts = routeFactsFromPreview(routePreview, language);
+  const highestAltitude = routePreview
+    ? routePreview.stats.highestElevationM
+    : HIGHEST_ALTITUDE_METERS;
+  const lowestAltitude = routePreview
+    ? routePreview.stats.lowestElevationM
+    : LOWEST_ALTITUDE_METERS;
+  const elevationSummary = highestAltitude == null || lowestAltitude == null
+    ? text(
+        "This GPX file does not include usable elevation data.",
+        "此 GPX 文件未包含可用的海拔数据。",
+      )
+    : text(
+        `Highest altitude: ${highestAltitude} meters. Lowest altitude: ${lowestAltitude} meters.`,
+        `最高海拔：${highestAltitude} 米。最低海拔：${lowestAltitude} 米。`,
+      );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setRoutePreview(readRoutePreview());
+      setRoutePreviewLoaded(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const handleRealMapStatus = useCallback((status: TerrainMapStatus) => {
+    setRealMapStatus(status);
+    if (status === "error") setPresentationStage("detail");
+  }, []);
+
+  const handleRealMapIntroComplete = useCallback(() => {
+    setPresentationStage("detail");
+  }, []);
+
+  useEffect(() => {
+    languageRef.current = language;
+    redrawTerrainRef.current?.();
+  }, [language]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -421,19 +567,17 @@ export function TrailMap() {
 
     let disposed = false;
     let animationFrame: number | undefined;
-    let paletteAnimationFrame: number | undefined;
     let detailShown = false;
     let dragMode: "pointer" | "mouse" | null = null;
     let previousPointerX = 0;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const animateFallback = !hasRealMapData;
     const animationStart = performance.now();
     const visualState = visualStateRef.current;
-    activePaletteRef.current = resolveContourPalette(
-      document.documentElement.dataset.track4trekContour,
-    );
-    visualState.routeProgress = reducedMotion ? 1 : 0;
-    visualState.elevationVisibility = reducedMotion ? 1 : 0;
-    visualState.yaw = reducedMotion ? 0.28 : -0.48;
+    activePaletteRef.current = FIXED_CONTOUR_PALETTE;
+    visualState.routeProgress = reducedMotion || !animateFallback ? 1 : 0;
+    visualState.elevationVisibility = animateFallback && reducedMotion ? 1 : 0;
+    visualState.yaw = reducedMotion || !animateFallback ? 0.28 : -0.48;
     const drawCurrentTerrain = () => {
       drawTerrain(
         canvas,
@@ -441,39 +585,12 @@ export function TrailMap() {
         visualState.elevationVisibility,
         visualState.yaw,
         activePaletteRef.current,
+        routePath,
+        routePreview,
+        languageRef.current,
       );
     };
-
-    const handleLandscapeChange = (event: Event) => {
-      const paletteName = (event as CustomEvent<{ contourPalette?: string }>).detail?.contourPalette;
-      const nextPalette = resolveContourPalette(paletteName);
-      if (nextPalette.name === activePaletteRef.current.name) return;
-      if (paletteAnimationFrame !== undefined) {
-        window.cancelAnimationFrame(paletteAnimationFrame);
-      }
-      const previousPalette = activePaletteRef.current;
-      const transitionStart = performance.now();
-
-      const transitionPalette = (now: number) => {
-        if (disposed) return;
-        const progress = Math.min((now - transitionStart) / 1100, 1);
-        const easedProgress = progress * progress * (3 - 2 * progress);
-        activePaletteRef.current = blendContourPalette(
-          previousPalette,
-          nextPalette,
-          easedProgress,
-        );
-        drawCurrentTerrain();
-        if (progress < 1) {
-          paletteAnimationFrame = window.requestAnimationFrame(transitionPalette);
-        } else {
-          activePaletteRef.current = nextPalette;
-          paletteAnimationFrame = undefined;
-        }
-      };
-
-      paletteAnimationFrame = window.requestAnimationFrame(transitionPalette);
-    };
+    redrawTerrainRef.current = drawCurrentTerrain;
 
     const resizeObserver = new ResizeObserver(() => {
       drawCurrentTerrain();
@@ -544,13 +661,17 @@ export function TrailMap() {
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", endMouseRotation);
     canvas.addEventListener("keydown", handleKeyDown);
-    window.addEventListener(LANDSCAPE_CHANGE_EVENT, handleLandscapeChange);
 
-    if (reducedMotion) {
+    if (!animateFallback) {
+      detailShown = true;
+      animationFrame = window.requestAnimationFrame(() => {
+        if (!disposed) drawCurrentTerrain();
+      });
+    } else if (reducedMotion) {
       detailShown = true;
       animationFrame = window.requestAnimationFrame(() => {
         if (disposed) return;
-        setPresentationStage("detail");
+        if (!hasRealMapData) setPresentationStage("detail");
         drawCurrentTerrain();
       });
     } else {
@@ -571,7 +692,7 @@ export function TrailMap() {
 
         if (elapsed >= 3000 && !detailShown) {
           detailShown = true;
-          setPresentationStage("detail");
+          if (!hasRealMapData) setPresentationStage("detail");
         }
 
         if (elapsed < 3000) animationFrame = window.requestAnimationFrame(animate);
@@ -590,62 +711,164 @@ export function TrailMap() {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", endMouseRotation);
       canvas.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener(LANDSCAPE_CHANGE_EVENT, handleLandscapeChange);
+      if (redrawTerrainRef.current === drawCurrentTerrain) redrawTerrainRef.current = null;
       if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
-      if (paletteAnimationFrame !== undefined) window.cancelAnimationFrame(paletteAnimationFrame);
     };
-  }, []);
+  }, [hasRealMapData, routePath, routePreview]);
 
   return (
     <section
-      className={`trail-map-shell is-${presentationStage}-stage`}
+      className={`trail-map-shell is-${presentationStage}-stage is-real-map-${realMapStatus}`}
       id="terrain-result"
       aria-labelledby="trail-map-title"
     >
-      <h1 className="visually-hidden" id="trail-map-title">Sample trail map</h1>
+      <h1 className="visually-hidden" id="trail-map-title">
+        {text("Three-dimensional trail map", "三维路线地图")}
+      </h1>
       <p className="visually-hidden">
-        A simplified three-dimensional contour terrain prototype with an animated route,
-        start and finish markers, followed by illustrative route statistics.
+        {text(
+          "A real geographic three-dimensional terrain map with contours generated from Mapterhorn elevation data, an animated route, start and finish markers, and route statistics. A local contour model remains available only if online terrain fails.",
+          "真实地理位置的三维地形地图，等高线由 Mapterhorn 高程数据生成，并包含路线动画、起终点标记和路线统计；仅在在线地形加载失败时显示本地等高线备用模型。",
+        )}
       </p>
       <p className="visually-hidden" id="terrain-rotation-help">
-        After the opening animation, drag horizontally or use the left and right arrow keys to rotate the terrain.
+        {text(
+          "After the opening animation, drag horizontally or use the left and right arrow keys to rotate the terrain.",
+          "开场动画结束后，可水平拖动，或使用左右方向键旋转地形。",
+        )}
       </p>
       <p className="visually-hidden" id="terrain-contrast-help">
-        Contour colors automatically adapt to the current landscape for contrast.
+        {text(
+          "Map rendering uses MapLibre GL JS, an OpenStreetMap basemap, and Mapterhorn terrain tiles.",
+          "地图使用 MapLibre GL JS、OpenStreetMap 底图和 Mapterhorn 地形瓦片进行渲染。",
+        )}
       </p>
       <p className="visually-hidden" id="terrain-elevation-help">
-        Highest altitude: {HIGHEST_ALTITUDE_METERS} meters. Lowest altitude: {LOWEST_ALTITUDE_METERS} meters.
+        {elevationSummary}
       </p>
 
       <div className="trail-map-stage">
+        <MapLibreTerrainMap
+          key={mapAttempt}
+          segments={geographicSegments}
+          language={language}
+          displayMode={displayMode}
+          onStatusChange={handleRealMapStatus}
+          onIntroComplete={handleRealMapIntroComplete}
+        />
         <canvas
           className="trail-map-canvas trail-contour-canvas"
           ref={canvasRef}
-          role="img"
-          tabIndex={0}
-          data-contour-contrast="automatic"
-          data-highest-altitude={HIGHEST_ALTITUDE_METERS}
-          data-lowest-altitude={LOWEST_ALTITUDE_METERS}
-          aria-label="Rotatable 3D contour terrain prototype with a bright route from start to finish"
+          role="application"
+          aria-roledescription={text("interactive terrain map", "交互式地形地图")}
+          tabIndex={realMapStatus === "ready" ? -1 : 0}
+          aria-hidden={realMapStatus === "ready"}
+          data-contour-contrast="fixed"
+          data-highest-altitude={highestAltitude ?? undefined}
+          data-lowest-altitude={lowestAltitude ?? undefined}
+          aria-label={text(
+            "Fallback rotatable contour terrain with a route from start to finish",
+            "可旋转的备用等高线地形，以路线连接起点与终点",
+          )}
           aria-describedby="terrain-rotation-help terrain-contrast-help terrain-elevation-help"
         >
-          A simplified contour terrain model with a highlighted trail.
+          {text(
+            "A local contour terrain fallback with a highlighted trail.",
+            "突出显示路线的本地等高线备用模型。",
+          )}
         </canvas>
+        <p className="visually-hidden" aria-live="polite">
+          {realMapStatus === "loading"
+            ? text("Loading real terrain map.", "正在加载真实地形地图。")
+            : realMapStatus === "ready"
+              ? text("Real terrain map ready.", "真实地形地图已就绪。")
+              : realMapStatus === "error"
+                ? text(
+                    "Online terrain is unavailable; showing the local contour fallback.",
+                    "在线地形暂不可用；正在显示本地等高线备用模型。",
+                  )
+                : ""}
+        </p>
+        <div
+          className="terrain-display-switch"
+          role="group"
+          aria-label={text("Terrain display", "地形显示")}
+          data-terrain-mode-control
+        >
+          <button
+            type="button"
+            aria-pressed={displayMode === "contour"}
+            disabled={!hasRealMapData || realMapStatus === "error"}
+            onClick={() => setDisplayMode("contour")}
+          >
+            {text("Contour render", "等高线渲染")}
+          </button>
+          <button
+            type="button"
+            aria-pressed={displayMode === "real"}
+            disabled={!hasRealMapData || realMapStatus === "error"}
+            onClick={() => setDisplayMode("real")}
+          >
+            {text("Real map", "真实地图")}
+          </button>
+        </div>
       </div>
 
-      <aside className="trail-route-facts" aria-label="Illustrative route summary">
+      {routePreviewLoaded && routePreview?.version === 1 && !hasRealMapData ? (
+        <div className="trail-map-fallback-notice" role="status">
+          <span>
+            {text(
+              "This saved route predates real terrain support.",
+              "此已保存路线早于真实地形功能。",
+            )}
+          </span>
+          <Link href="/#route-input">
+            {text("Re-upload GPX", "重新上传 GPX")}
+          </Link>
+        </div>
+      ) : null}
+
+      {routePreviewLoaded && hasRealMapData && realMapStatus === "error" ? (
+        <div className="trail-map-fallback-notice" role="status">
+          <span>
+            {text(
+              "Online terrain could not load, so the local contour fallback is shown.",
+              "在线地形无法加载，因此正在显示本地等高线备用模型。",
+            )}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setRealMapStatus("loading");
+              setPresentationStage("intro");
+              setMapAttempt((attempt) => attempt + 1);
+            }}
+          >
+            {text("Retry terrain", "重试地形")}
+          </button>
+        </div>
+      ) : null}
+
+      <aside
+        className="trail-route-facts"
+        aria-label={text("Route summary", "路线概览")}
+      >
         <dl>
           {routeFacts.map((fact) => (
-            <div key={fact.label}>
+            <div key={`${fact.value}-${fact.unit}`}>
               <dt>{fact.label}</dt>
               <dd><strong>{fact.value}</strong><span>{fact.unit}</span></dd>
             </div>
           ))}
         </dl>
-        <p>Prototype values</p>
+        <p>{routePreview ? routePreview.fileName : text("Prototype values", "原型示例数据")}</p>
       </aside>
 
-      <a className="map-scroll-cue" href="#metrics" aria-label="Scroll to recommended metric ranges">
+      <a
+        className="map-scroll-cue"
+        href="#metrics"
+        aria-label={text("Scroll to recommended metric ranges", "滚动至建议指标范围")}
+      >
         <span />
       </a>
     </section>

@@ -13,6 +13,7 @@ const eslintConfig = defineConfig([
     "dist/**",
     "out/**",
     "build/**",
+    "public/maplibre/**",
     "next-env.d.ts",
   ]),
 ]);

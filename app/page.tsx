@@ -1,27 +1,29 @@
+"use client";
+
+import { useLanguage } from "./_components/language-system";
 import { RouteIntake } from "./_components/route-intake";
-import { SiteHeader } from "./_components/site-header";
 
 export default function Home() {
+  const { text } = useLanguage();
+
   return (
     <main className="site-page landing-page" id="main-content">
       <a className="skip-link" href="#route-input">
-        Skip to route input
+        {text("Skip to route input", "跳至路线导入")}
       </a>
-      <SiteHeader active="plan" minimal />
-
       <section className="landing-hero" aria-labelledby="landing-title">
-        <div className="landing-image" aria-hidden="true" />
-        <div className="landing-shade" aria-hidden="true" />
-        <div className="mist-layer mist-one" aria-hidden="true" />
-        <div className="mist-layer mist-two" aria-hidden="true" />
-
         <div className="hero-copy-block">
           <p className="prototype-kicker">
-            <span aria-hidden="true" /> Route intelligence
+            <span aria-hidden="true" /> {text("Route intelligence", "路线智能分析")}
           </p>
-          <h1 id="landing-title">Know what the trail asks.</h1>
+          <h1 id="landing-title">
+            {text("Know what the trail asks.", "了解这条路线对你的要求。")}
+          </h1>
           <p className="hero-summary">
-            Terrain, effort and conditions—from one GPX route.
+            {text(
+              "Terrain, effort and conditions—from one GPX route.",
+              "从一份 GPX 路线，读懂地形、体能与环境条件。",
+            )}
           </p>
         </div>
 

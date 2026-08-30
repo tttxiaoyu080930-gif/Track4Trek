@@ -11,6 +11,9 @@ importers:
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2
+      maplibre-contour:
+        specifier: 0.1.0
+        version: 0.1.0
       maplibre-gl:
         specifier: 6.2.0
         version: 6.2.0
@@ -2823,6 +2826,9 @@ packages:
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
+
+  maplibre-contour@0.1.0:
+    resolution: {integrity: sha512-H8muT7JWYE4oLbFv7L2RSbIM1NOu5JxjA9P/TQqhODDnRChE8ENoDkQIWOKgfcKNU77ypLk2ggGoh4/pt4UPLA==}
 
   maplibre-gl@6.2.0:
     resolution: {integrity: sha512-PaNYtxWmYgIdDHshXsnU3Pho+H9IPme9H6dTjZbFWNazi+Q5QgKgIlu2GiSGVtOZ77/Fz3n5/1/kGM6ETzu0Lg==}
@@ -6053,6 +6059,8 @@ snapshots:
   magic-string@0.30.21:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  maplibre-contour@0.1.0: {}
 
   maplibre-gl@6.2.0:
     dependencies:
