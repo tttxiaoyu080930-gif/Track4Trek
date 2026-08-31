@@ -1048,7 +1048,14 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
                 title={text("File and source", "文件与来源")}
                 rows={[
                   { label: text("Path type", "路径类型"), value: technical.pathKind === "track" ? text("GPX track", "GPX 轨迹") : technical.pathKind === "route" ? text("GPX route", "GPX 路线") : text("Sample route", "示例路线") },
-                  { label: text("Source", "来源"), value: technical.sourceKind === "uploaded-gpx" ? text("Uploaded GPX", "上传的 GPX") : text("Built-in sample", "内置示例") },
+                  {
+                    label: text("Source", "来源"),
+                    value: technical.sourceKind === "uploaded-gpx"
+                      ? text("Uploaded GPX", "上传的 GPX")
+                      : technical.sourceKind === "archive"
+                        ? text("OpenStreetMap trail archive", "OpenStreetMap 路线库")
+                        : text("Built-in sample", "内置示例"),
+                  },
                   { label: text("Schema", "架构版本"), value: `RoutePreview v${preview.version}` },
                   { label: text("Coordinates", "坐标点"), value: `${technical.pointCount}`, detail: `${technical.sampledCoordinateCount} ${text("retained for display", "个用于显示")}` },
                   { label: text("Tracks / segments", "轨迹 / 区段"), value: `${technical.trackCount} / ${technical.segmentCount}` },

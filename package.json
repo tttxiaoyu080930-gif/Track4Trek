@@ -13,7 +13,7 @@
     "prebuild:vercel": "node ./scripts/copy-maplibre-worker.mjs",
     "build:vercel": "next build",
     "start": "vinext start",
-    "test": "pnpm run build && node --test tests/route-demand.test.mjs tests/pro-route-analysis.test.mjs tests/weather-model.test.mjs tests/surface-model.test.mjs tests/rendered-html.test.mjs",
+    "test": "pnpm run build && node --test tests/route-demand.test.mjs tests/pro-route-analysis.test.mjs tests/weather-model.test.mjs tests/surface-model.test.mjs tests/trail-archive.test.mjs tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },

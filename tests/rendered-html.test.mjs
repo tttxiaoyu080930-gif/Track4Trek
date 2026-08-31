@@ -110,7 +110,7 @@ test("trip survey stores a numeric personal profile without a date field", async
   assert.match(globalStyles, /\.minimal-drop::before[\s\S]*?pointer-events:\s*none/);
 });
 
-test("sample library exposes five sanitized, parser-ready routes", async () => {
+test("trail archive exposes five sanitized featured routes and the OpenStreetMap route flow", async () => {
   const intakeSource = await readFile(
     new URL("../app/_components/route-intake.tsx", import.meta.url),
     "utf8",
@@ -130,6 +130,8 @@ test("sample library exposes five sanitized, parser-ready routes", async () => {
   assert.doesNotMatch(intakeSource, /createSampleRoutePreview/);
   assert.match(intakeSource, /parseGpxRoute\(fileName, uploadedText \?\? "", survey, sourceKind\)/);
   assert.match(intakeSource, /setSourceKind\("sample"\)/);
+  assert.match(intakeSource, /setSourceKind\("archive"\)/);
+  assert.match(intakeSource, /\/api\/trail\/archive\/gpx\?id=/);
 
   for (const asset of sampleAssets) {
     assert.match(sampleManifest, new RegExp(`/samples/${asset.replaceAll(".", "\\.")}`));
@@ -162,13 +164,18 @@ test("server-renders the Track4Trek homepage", async () => {
   assert.match(html, /Know what the trail asks\./i);
   assert.match(html, /Terrain, effort and conditions/i);
   assert.match(html, /Choose a GPX route file/i);
-  assert.match(html, /Sample library/i);
+  assert.match(html, /Trail archive/i);
+  assert.match(html, /Open trail archive/i);
+  assert.match(html, /Featured routes/i);
+  assert.match(html, /Search the world/i);
+  assert.match(html, /City, park or trail region/i);
   assert.match(html, /Langta C\+V/i);
   assert.match(html, /Lingbai Route/i);
   assert.match(html, /Wusun Ancient Trail/i);
   assert.match(html, /Mount Wutai Circuit/i);
   assert.match(html, /Everest East Slope/i);
-  assert.match(html, /More routes coming soon/i);
+  assert.match(html, /More routes arrive as the community maps them/i);
+  assert.match(html, /OpenStreetMap contributors/i);
   assert.match(html, /Upload and analyse a route/i);
   assert.match(html, /Use light mode/i);
   assert.match(html, /role="group" aria-label="Language"/i);

@@ -12,9 +12,10 @@ import {
   type TripMode,
 } from "../_lib/route-data";
 import type { SampleRouteDefinition } from "../_lib/sample-routes";
+import type { ArchiveRoute } from "../_lib/trail-archive";
 import { useLanguage } from "./language-system";
 import { usePageTransition } from "./page-transition";
-import { SampleLibrary } from "./sample-library";
+import { TrailArchive } from "./trail-archive";
 
 type IntakeError =
   | "gpx-only"
@@ -23,6 +24,7 @@ type IntakeError =
   | "too-few-points"
   | "invalid-survey"
   | "sample-failed"
+  | "archive-failed"
   | "analysis-failed";
 
 function formNumber(formData: FormData, name: string) {
@@ -41,7 +43,7 @@ export function RouteIntake() {
   const [isReading, setIsReading] = useState(false);
   const [uploadedText, setUploadedText] = useState<string | null>(null);
   const [sourceKind, setSourceKind] = useState<RoutePreview["source"]["kind"]>("uploaded-gpx");
-  const [isSampleLibraryOpen, setIsSampleLibraryOpen] = useState(false);
+  const [isTrailArchiveOpen, setIsTrailArchiveOpen] = useState(false);
   const [tripMode, setTripMode] = useState<TripMode>("single-day");
   const [plannedDays, setPlannedDays] = useState("5");
   const [movingHours, setMovingHours] = useState("7");
@@ -90,7 +92,7 @@ export function RouteIntake() {
   }
 
   async function selectSampleRoute(route: SampleRouteDefinition) {
-    setIsSampleLibraryOpen(false);
+    setIsTrailArchiveOpen(false);
     setIsReading(true);
     setFileName("");
     setUploadedText(null);
@@ -106,6 +108,30 @@ export function RouteIntake() {
       setSourceKind("sample");
     } catch {
       setError("sample-failed");
+    } finally {
+      setIsReading(false);
+    }
+  }
+
+  async function selectArchiveRoute(route: ArchiveRoute) {
+    setIsReading(true);
+    setFileName("");
+    setUploadedText(null);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/trail/archive/gpx?id=${route.relationId}`);
+      const payload = await response.json() as { fileName?: unknown; gpx?: unknown };
+      if (!response.ok || typeof payload.fileName !== "string" || typeof payload.gpx !== "string") {
+        throw new Error(`Archive route request failed with ${response.status}`);
+      }
+      setFileName(payload.fileName);
+      setUploadedText(payload.gpx);
+      setSourceKind("archive");
+      setIsTrailArchiveOpen(false);
+    } catch (caughtError) {
+      setError("archive-failed");
+      throw caughtError;
     } finally {
       setIsReading(false);
     }
@@ -198,49 +224,61 @@ export function RouteIntake() {
 
   return (
     <div className="minimal-intake" id="route-input">
-      <div
-        className={`minimal-drop${isDragging ? " is-dragging" : ""}`}
-        onDragEnter={(event) => {
-          event.preventDefault();
-          setIsDragging(true);
-        }}
-        onDragOver={(event) => event.preventDefault()}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={handleDrop}
-      >
-        <label className="minimal-drop-label" htmlFor={inputId}>
-          <span className="drop-symbol" aria-hidden="true">
-            <i className="drop-mountain-one" />
-            <i className="drop-mountain-two" />
-            <b />
-            <em />
-          </span>
-          <span className="visually-hidden">
-            {text("Choose a GPX route file", "选择 GPX 路线文件")}
-          </span>
-        </label>
-        <input
-          className="visually-hidden"
-          id={inputId}
-          type="file"
-          accept=".gpx,application/gpx+xml"
-          onChange={(event) => void selectFile(event.target.files?.[0])}
-        />
-      </div>
+      <div className="route-source-pair" aria-label={text("Choose route source", "选择路线来源")}>
+        <div className="route-source-option">
+          <div
+            className={`minimal-drop${isDragging ? " is-dragging" : ""}`}
+            onDragEnter={(event) => {
+              event.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={handleDrop}
+          >
+            <label className="minimal-drop-label" htmlFor={inputId}>
+              <span className="drop-symbol" aria-hidden="true">
+                <i className="drop-mountain-one" />
+                <i className="drop-mountain-two" />
+                <b />
+                <em />
+              </span>
+              <span className="visually-hidden">
+                {text("Choose a GPX route file", "选择 GPX 路线文件")}
+              </span>
+            </label>
+            <input
+              className="visually-hidden"
+              id={inputId}
+              type="file"
+              accept=".gpx,application/gpx+xml"
+              onChange={(event) => void selectFile(event.target.files?.[0])}
+            />
+          </div>
+          <span className="route-source-label">{text("Upload GPX", "上传 GPX")}</span>
+        </div>
 
-      <button
-        className="sample-library-trigger"
-        type="button"
-        aria-haspopup="dialog"
-        aria-controls="sample-library-dialog"
-        aria-expanded={isSampleLibraryOpen}
-        disabled={isReading}
-        onClick={() => setIsSampleLibraryOpen(true)}
-      >
-        <span aria-hidden="true" />
-        {text("Sample library", "示例路线库")}
-        <small aria-hidden="true">05</small>
-      </button>
+        <button
+          className="route-source-option archive-source-option"
+          type="button"
+          aria-haspopup="dialog"
+          aria-controls="trail-archive-dialog"
+          aria-expanded={isTrailArchiveOpen}
+          disabled={isReading}
+          onClick={() => setIsTrailArchiveOpen(true)}
+        >
+          <span className="archive-source-orb" aria-hidden="true">
+            <svg viewBox="0 0 64 64">
+              <path d="M12 19 25 13l14 6 13-6v32l-13 6-14-6-13 6Z" />
+              <path d="M25 13v32m14-26v32" />
+              <path d="M18 34c5-7 10-8 14-3s9 4 14-3" />
+              <circle cx="18" cy="34" r="2.5" />
+              <circle cx="46" cy="28" r="2.5" />
+            </svg>
+          </span>
+          <span className="route-source-label">{text("Trail archive", "全球路线库")}</span>
+        </button>
+      </div>
       <span className="intake-error" role={isReading ? "status" : "alert"} aria-live="polite">
         {isReading
           ? text("Loading route", "正在载入路线")
@@ -256,16 +294,19 @@ export function RouteIntake() {
                     ? text("Check the trip and profile values", "请检查行程与个人资料数值")
                     : error === "sample-failed"
                       ? text("Could not load this sample route", "无法载入此示例路线")
+                      : error === "archive-failed"
+                        ? text("Could not load this archive route", "无法载入此路线库路线")
                       : error === "analysis-failed"
                         ? text("This route could not be analysed", "无法分析此路线")
                         : ""}
       </span>
 
-      <SampleLibrary
-        open={isSampleLibraryOpen}
+      <TrailArchive
+        open={isTrailArchiveOpen}
         disabled={isReading}
-        onClose={() => setIsSampleLibraryOpen(false)}
-        onSelect={(route) => void selectSampleRoute(route)}
+        onClose={() => setIsTrailArchiveOpen(false)}
+        onSelectSample={(route) => void selectSampleRoute(route)}
+        onSelectArchive={selectArchiveRoute}
       />
 
       {fileName && (

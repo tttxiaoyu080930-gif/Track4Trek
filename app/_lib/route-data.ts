@@ -87,7 +87,7 @@ export type RoutePreview = {
   createdAt: string;
   survey: SurveyInput;
   source: {
-    kind: "uploaded-gpx" | "sample";
+    kind: "uploaded-gpx" | "sample" | "archive";
     pointCount: number;
     trackCount: number;
     segmentCount?: number;
@@ -579,7 +579,7 @@ function isStoredRoutePreview(value: unknown): value is RoutePreview {
   ) return false;
 
   if (
-    !["uploaded-gpx", "sample"].includes(String(value.source.kind)) ||
+    !["uploaded-gpx", "sample", "archive"].includes(String(value.source.kind)) ||
     !isFiniteNumber(value.source.pointCount) ||
     !isFiniteNumber(value.source.trackCount) ||
     !isFiniteNumber(value.source.waypointCount) ||
