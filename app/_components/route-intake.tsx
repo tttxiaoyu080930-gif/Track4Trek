@@ -2,10 +2,14 @@
 
 import { DragEvent, FormEvent, useId, useState } from "react";
 import {
+  clampMovingMinutesForPlan,
+  maximumMovingMinutesForPlan,
+  minimumMovingMinutesForPlan,
   parseGpxRoute,
   saveRoutePreview,
   type RoutePreview,
   type SurveyInput,
+  type TripMode,
 } from "../_lib/route-data";
 import type { SampleRouteDefinition } from "../_lib/sample-routes";
 import { useLanguage } from "./language-system";
@@ -38,6 +42,31 @@ export function RouteIntake() {
   const [uploadedText, setUploadedText] = useState<string | null>(null);
   const [sourceKind, setSourceKind] = useState<RoutePreview["source"]["kind"]>("uploaded-gpx");
   const [isSampleLibraryOpen, setIsSampleLibraryOpen] = useState(false);
+  const [tripMode, setTripMode] = useState<TripMode>("single-day");
+  const [plannedDays, setPlannedDays] = useState("5");
+  const [movingHours, setMovingHours] = useState("7");
+  const [movingMinutes, setMovingMinutes] = useState("0");
+
+  function clampMovingTime(nextMode: TripMode, nextDays: number) {
+    const totalMinutes = (Number(movingHours) || 0) * 60 +
+      (Number(movingMinutes) || 0);
+    const clamped = clampMovingMinutesForPlan(totalMinutes, nextMode, nextDays);
+    setMovingHours(String(Math.floor(clamped / 60)));
+    setMovingMinutes(String(clamped % 60));
+  }
+
+  function selectTripMode(nextMode: TripMode) {
+    setTripMode(nextMode);
+    const nextDays = nextMode === "multi-day" ? Number(plannedDays) : 1;
+    clampMovingTime(nextMode, nextDays);
+  }
+
+  function updatePlannedDays(nextValue: string) {
+    setPlannedDays(nextValue);
+    if (nextValue !== "" && Number.isFinite(Number(nextValue))) {
+      clampMovingTime("multi-day", Number(nextValue));
+    }
+  }
 
   async function selectFile(file?: File) {
     if (!file) return;
@@ -94,8 +123,15 @@ export function RouteIntake() {
     let survey: SurveyInput;
 
     try {
+      const selectedTripMode = String(
+        formData.get("tripMode") ?? "single-day",
+      ) as TripMode;
       survey = {
         activity: String(formData.get("activity") ?? "day-hike") as SurveyInput["activity"],
+        tripMode: selectedTripMode,
+        plannedDays: selectedTripMode === "multi-day"
+          ? formNumber(formData, "plannedDays")
+          : 1,
         sex: String(formData.get("sex") ?? "") as SurveyInput["sex"],
         ageYears: formNumber(formData, "ageYears"),
         bodyWeightKg: formNumber(formData, "bodyWeightKg"),
@@ -107,6 +143,12 @@ export function RouteIntake() {
 
       if (
         !["day-hike", "trail-run", "backpacking"].includes(survey.activity) ||
+        !["single-day", "multi-day"].includes(survey.tripMode) ||
+        !Number.isInteger(survey.plannedDays) ||
+        survey.plannedDays < 1 ||
+        survey.plannedDays > 30 ||
+        (survey.tripMode === "single-day" && survey.plannedDays !== 1) ||
+        (survey.tripMode === "multi-day" && survey.plannedDays < 2) ||
         !["male", "female"].includes(survey.sex) ||
         !Number.isInteger(survey.ageYears) ||
         survey.ageYears < 13 ||
@@ -119,12 +161,14 @@ export function RouteIntake() {
         survey.packWeightKg > 60 ||
         !Number.isInteger(survey.movingHours) ||
         survey.movingHours < 0 ||
-        survey.movingHours > 48 ||
+        survey.movingHours > 480 ||
         !Number.isInteger(survey.movingMinutes) ||
         survey.movingMinutes < 0 ||
         survey.movingMinutes > 59 ||
-        survey.movingHours * 60 + survey.movingMinutes < 1 ||
-        survey.movingHours * 60 + survey.movingMinutes > 48 * 60
+        survey.movingHours * 60 + survey.movingMinutes <
+          minimumMovingMinutesForPlan(survey.tripMode, survey.plannedDays) ||
+        survey.movingHours * 60 + survey.movingMinutes >
+          maximumMovingMinutesForPlan(survey.tripMode, survey.plannedDays)
       ) {
         throw new Error("Survey values are outside the supported range.");
       }
@@ -283,13 +327,84 @@ export function RouteIntake() {
               </fieldset>
             </div>
 
+            <div className="survey-schedule-row">
+              <fieldset className="survey-fieldset compact-fieldset survey-schedule-fieldset">
+                <legend>{text("Trip length", "行程类型")}</legend>
+                <div className="choice-row">
+                  {[
+                    ["single-day", text("Single day", "单日")],
+                    ["multi-day", text("Multi-day", "多日")],
+                  ].map(([value, label]) => (
+                    <label key={value}>
+                      <input
+                        type="radio"
+                        name="tripMode"
+                        value={value}
+                        checked={tripMode === value}
+                        onChange={() => selectTripMode(value as TripMode)}
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              {tripMode === "multi-day" ? (
+                <label className="survey-control survey-days-control">
+                  <span>{text("Planned days", "计划天数")}</span>
+                  <span className="measurement-input">
+                    <input
+                      aria-label={text("Number of planned route days", "计划路线天数")}
+                      aria-describedby="survey-stage-method"
+                      name="plannedDays"
+                      type="number"
+                      min="2"
+                      max="30"
+                      step="1"
+                      value={plannedDays}
+                      onChange={(event) => updatePlannedDays(event.target.value)}
+                      required
+                    />
+                    <small>{text("days", "天")}</small>
+                  </span>
+                </label>
+              ) : null}
+              <p id="survey-stage-method">
+                {text(
+                  "Multi-day routes are balanced into estimated daily stages.",
+                  "多日路线会被均衡拆分为估算的每日阶段。",
+                )}
+              </p>
+            </div>
+
             <div className="survey-grid compact-grid">
               <label className="survey-control survey-time-control">
-                <span>{text("Moving time", "预计移动时间")}</span>
+                <span>{text("Total moving time", "全程移动时间")}</span>
                 <span className="time-inputs">
-                  <input aria-label={text("Moving time hours", "移动时间（小时）")} name="movingHours" type="number" min="0" max="48" defaultValue="7" required />
+                  <input
+                    aria-label={text("Total moving time hours", "全程移动时间（小时）")}
+                    name="movingHours"
+                    type="number"
+                    min="0"
+                    max={maximumMovingMinutesForPlan(
+                      tripMode,
+                      tripMode === "multi-day" ? Number(plannedDays) : 1,
+                    ) / 60}
+                    value={movingHours}
+                    onChange={(event) => setMovingHours(event.target.value)}
+                    required
+                  />
                   <small>{text("hr", "时")}</small>
-                  <input aria-label={text("Moving time minutes", "移动时间（分钟）")} name="movingMinutes" type="number" min="0" max="59" defaultValue="0" required />
+                  <input
+                    aria-label={text("Moving time minutes", "移动时间（分钟）")}
+                    name="movingMinutes"
+                    type="number"
+                    min="0"
+                    max="59"
+                    value={movingMinutes}
+                    onChange={(event) => setMovingMinutes(event.target.value)}
+                    required
+                  />
                   <small>{text("min", "分")}</small>
                 </span>
               </label>

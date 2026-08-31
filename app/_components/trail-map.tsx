@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   readRoutePreview,
@@ -813,20 +812,6 @@ export function TrailMap() {
           </button>
         </div>
       </div>
-
-      {routePreviewLoaded && routePreview?.version === 1 && !hasRealMapData ? (
-        <div className="trail-map-fallback-notice" role="status">
-          <span>
-            {text(
-              "This saved route predates real terrain support.",
-              "此已保存路线早于真实地形功能。",
-            )}
-          </span>
-          <Link href="/#route-input">
-            {text("Re-upload GPX", "重新上传 GPX")}
-          </Link>
-        </div>
-      ) : null}
 
       {routePreviewLoaded && hasRealMapData && realMapStatus === "error" ? (
         <div className="trail-map-fallback-notice" role="status">

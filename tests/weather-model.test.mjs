@@ -11,6 +11,8 @@ import {
 
 const SURVEY = {
   activity: "day-hike",
+  tripMode: "single-day",
+  plannedDays: 1,
   sex: "male",
   ageYears: 30,
   bodyWeightKg: 70,
@@ -22,7 +24,7 @@ const SURVEY = {
 
 function preview() {
   return {
-    version: 3,
+    version: 4,
     fileName: "weather-fixture.gpx",
     createdAt: "2026-08-30T00:00:00.000Z",
     survey: SURVEY,

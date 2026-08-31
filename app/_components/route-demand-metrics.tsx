@@ -152,10 +152,15 @@ export function RouteDemandMetrics({ status, analysis }: RouteDemandMetricsProps
           end: endurance.dial.endPct,
           tone: "gold" as const,
           unit: `${sexLabel} · ${endurance.ageBand}`,
-          reason: text(
-            "Track4Trek maps route duration and energy to this published reference category. It is not your Garmin Endurance Score.",
-            "Track4Trek 将路线时长与能量映射至该公开参考等级；这不是你的 Garmin 耐力分数。",
-          ),
+          reason: analysis.endurancePlan.tripMode === "multi-day"
+            ? text(
+                `Track4Trek combines ${analysis.endurancePlan.plannedDays} balanced daily stages with bounded overnight carry. This is not your Garmin Endurance Score.`,
+                `Track4Trek 将 ${analysis.endurancePlan.plannedDays} 个均衡日程阶段与有上限的隔夜承接负荷组合；这不是你的 Garmin 耐力分数。`,
+              )
+            : text(
+                "Track4Trek maps route duration and energy to this published reference category. It is not your Garmin Endurance Score.",
+                "Track4Trek 将路线时长与能量映射至该公开参考等级；这不是你的 Garmin 耐力分数。",
+              ),
           estimateStatus: endurance.status,
         };
 

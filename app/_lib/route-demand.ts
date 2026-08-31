@@ -1,6 +1,7 @@
-import type { ProfileSex, RoutePreview, TripActivity } from "./route-data";
+import type { ProfileSex, RoutePreview, TripActivity, TripMode } from "./route-data";
 
-export const ROUTE_DEMAND_MODEL_VERSION = "route-demand-v0.1" as const;
+export const ROUTE_DEMAND_MODEL_VERSION = "route-demand-v0.2" as const;
+export const ENDURANCE_OVERNIGHT_CARRY = 0.35;
 
 export type EstimateStatus = "estimated" | "outside-model" | "unavailable";
 export type EstimateConfidence = "medium" | "low";
@@ -17,6 +18,7 @@ export type DemandReasonCode =
   | "threshold-duration-too-short"
   | "no-heart-rate"
   | "no-training-history"
+  | "multi-day-balanced-stage-assumption"
   | "heuristic-unvalidated";
 
 export type DialProjection = {
@@ -81,6 +83,27 @@ export type RouteDemandAnalysis = {
   };
   confidence: EstimateConfidence;
   warnings: DemandReasonCode[];
+  endurancePlan: {
+    tripMode: TripMode;
+    plannedDays: number;
+    method: "single-stage" | "balanced-modeled-effort";
+    carryCoefficient: number;
+    limitingDay: number | null;
+    stages: Array<{
+      day: number;
+      distanceKm: number;
+      movingMinutes: number;
+      ascentM: number;
+      activeCalories: number;
+      rawSeverity: number;
+      carry: number;
+      adjustedSeverity: number;
+      category: EnduranceCategory;
+      rangeKind: "less-than" | "between" | "at-least";
+      referenceLow: number | null;
+      referenceHigh: number | null;
+    }>;
+  };
   features: {
     distanceKm: number;
     movingMinutes: number;
@@ -444,6 +467,140 @@ function calculateMetabolicDemand(
   };
 }
 
+type EnduranceStageSummary = {
+  distanceM: number;
+  ascentM: number;
+  movingMinutes: number;
+  activeCalories: number;
+};
+
+function enduranceSeverityForLoad(
+  stage: EnduranceStageSummary,
+  bodyWeightKg: number,
+) {
+  const movingHours = stage.movingMinutes / 60;
+  const distanceKm = stage.distanceM / 1000;
+  const caloriesPerBodyKg = stage.activeCalories / Math.max(bodyWeightKg, 1);
+
+  return clamp01(
+    0.5 * clamp01(movingHours / 14) +
+    0.3 * clamp01((distanceKm + stage.ascentM / 100) / 70) +
+    0.2 * clamp01(caloriesPerBodyKg / 70),
+  );
+}
+
+function normalizedTripPlan(preview: RoutePreview) {
+  const tripMode = preview.survey.tripMode === "multi-day"
+    ? "multi-day" as const
+    : "single-day" as const;
+  const plannedDays = tripMode === "multi-day"
+    ? Math.round(clamp(preview.survey.plannedDays, 2, 30))
+    : 1;
+
+  return { tripMode, plannedDays };
+}
+
+function buildEnduranceStageSummaries(
+  preview: RoutePreview,
+  segments: AnalysisSegment[],
+  routeDistanceM: number,
+  movingMinutes: number,
+  averageSpeedMps: number,
+  ascentM: number,
+  activeCalories: number,
+  plannedDays: number,
+) {
+  const analyzedDistanceM = Math.max(
+    segments.reduce((total, segment) => total + segment.distanceM, 0),
+    1,
+  );
+
+  if (plannedDays === 1) {
+    return [{
+      distanceM: routeDistanceM,
+      ascentM,
+      movingMinutes,
+      activeCalories,
+    }];
+  }
+
+  // GPX files do not normally contain overnight stops. Build contiguous stages
+  // with approximately equal modeled energy at the user's whole-route pace.
+  const weightedSegments = segments.map((segment) => {
+    const segmentMinutes = movingMinutes * (segment.distanceM / analyzedDistanceM);
+    const segmentCalories = calculateMetabolicDemand(
+      preview,
+      [segment],
+      segmentMinutes,
+      averageSpeedMps,
+    ).activeCalories;
+    return {
+      segment,
+      weight: Math.max(segmentCalories, segment.distanceM / 10_000),
+    };
+  });
+  const totalWeight = weightedSegments.reduce((total, entry) => total + entry.weight, 0);
+  const targetWeight = totalWeight / plannedDays;
+  const bins = Array.from({ length: plannedDays }, () => ({
+    distanceM: 0,
+    rawAscentM: 0,
+    weight: 0,
+  }));
+  let stageIndex = 0;
+
+  for (const entry of weightedSegments) {
+    let remainingFraction = 1;
+    while (remainingFraction > 1e-9) {
+      const bin = bins[stageIndex];
+      const remainingWeight = entry.weight * remainingFraction;
+      const capacity = stageIndex === plannedDays - 1
+        ? remainingWeight
+        : Math.max(targetWeight - bin.weight, 0);
+      const takenWeight = Math.min(remainingWeight, capacity || remainingWeight);
+      const takenFraction = takenWeight / entry.weight;
+
+      bin.distanceM += entry.segment.distanceM * takenFraction;
+      bin.rawAscentM += Math.max(entry.segment.riseM, 0) * takenFraction;
+      bin.weight += takenWeight;
+      remainingFraction = Math.max(remainingFraction - takenFraction, 0);
+
+      if (
+        stageIndex < plannedDays - 1 &&
+        bin.weight >= targetWeight - Math.max(targetWeight * 1e-9, 1e-9)
+      ) {
+        stageIndex += 1;
+      }
+    }
+  }
+
+  const rawAscentTotal = bins.reduce((total, bin) => total + bin.rawAscentM, 0);
+  const distanceScale = routeDistanceM / analyzedDistanceM;
+  const summaries = bins.map((bin) => {
+    const effortShare = bin.weight / Math.max(totalWeight, Number.EPSILON);
+    const distanceShare = bin.distanceM / analyzedDistanceM;
+    return {
+      distanceM: bin.distanceM * distanceScale,
+      ascentM: rawAscentTotal > 0
+        ? ascentM * (bin.rawAscentM / rawAscentTotal)
+        : ascentM * effortShare,
+      // The metabolic pass uses one whole-route target speed. Preserve that
+      // pace by allocating stage time from distance, while energy remains
+      // allocated by the modeled-effort boundaries.
+      movingMinutes: movingMinutes * distanceShare,
+      activeCalories: activeCalories * effortShare,
+    };
+  });
+
+  // Absorb floating-point drift into the final day so the audit totals remain exact.
+  const last = summaries.at(-1)!;
+  last.distanceM += routeDistanceM - summaries.reduce((total, stage) => total + stage.distanceM, 0);
+  last.ascentM += ascentM - summaries.reduce((total, stage) => total + stage.ascentM, 0);
+  last.movingMinutes += movingMinutes - summaries.reduce((total, stage) => total + stage.movingMinutes, 0);
+  last.activeCalories += activeCalories - summaries.reduce((total, stage) => total + stage.activeCalories, 0);
+
+  return summaries;
+}
+
 function hillBandForSeverity(severity: number) {
   const index = severity < 0.16
     ? 0
@@ -473,6 +630,30 @@ function enduranceReferenceRow(sex: ProfileSex, ageYears: number) {
   return ENDURANCE_REFERENCE[sex].find(
     (row) => ageYears >= row.minAge && ageYears <= row.maxAge,
   ) ?? null;
+}
+
+function enduranceBandForSeverity(
+  severity: number,
+  referenceRow: EnduranceReferenceRow | null,
+) {
+  const index = enduranceCategoryIndex(severity);
+  const category = ENDURANCE_CATEGORIES[index];
+  const referenceLow = !referenceRow || index === 0 ? null : referenceRow.starts[index];
+  const referenceHigh = !referenceRow || index === 6
+    ? null
+    : referenceRow.starts[index + 1] - 1;
+
+  return {
+    index,
+    category,
+    referenceLow,
+    referenceHigh,
+    rangeKind: index === 0
+      ? "less-than" as const
+      : index === 6
+        ? "at-least" as const
+        : "between" as const,
+  };
 }
 
 function vo2Reference(sex: ProfileSex, ageYears: number) {
@@ -508,6 +689,7 @@ function unavailable(reasons: DemandReasonCode[]): UnavailableEstimate {
 
 function emptyAnalysis(preview: RoutePreview): RouteDemandAnalysis {
   const reasons: DemandReasonCode[] = ["insufficient-route"];
+  const { tripMode, plannedDays } = normalizedTripPlan(preview);
   const empty = unavailable(reasons);
   const zeroEstimate: NumericEstimate = {
     status: "outside-model",
@@ -530,6 +712,14 @@ function emptyAnalysis(preview: RoutePreview): RouteDemandAnalysis {
     },
     confidence: "low",
     warnings: reasons,
+    endurancePlan: {
+      tripMode,
+      plannedDays,
+      method: tripMode === "multi-day" ? "balanced-modeled-effort" : "single-stage",
+      carryCoefficient: ENDURANCE_OVERNIGHT_CARRY,
+      limitingDay: null,
+      stages: [],
+    },
     features: {
       distanceKm: 0,
       movingMinutes: 0,
@@ -561,6 +751,7 @@ function emptyAnalysis(preview: RoutePreview): RouteDemandAnalysis {
 
 export function calculateRouteDemand(preview: RoutePreview): RouteDemandAnalysis {
   const movingMinutes = preview.survey.movingHours * 60 + preview.survey.movingMinutes;
+  const { tripMode, plannedDays } = normalizedTripPlan(preview);
   const { segments, routeDistanceM, elevationCoverage, hasElevationProfile } =
     buildSegments(preview);
   if (routeDistanceM <= 0 || movingMinutes <= 0 || segments.length === 0) {
@@ -654,23 +845,64 @@ export function calculateRouteDemand(preview: RoutePreview): RouteDemandAnalysis
     : unavailable(["missing-elevation", "no-training-history", "heuristic-unvalidated"]);
 
   const caloriesPerBodyKg = metabolic.activeCalories / preview.survey.bodyWeightKg;
-  const enduranceSeverity = clamp01(
-    0.5 * clamp01(movingHours / 14) +
-    0.3 * clamp01((distanceKm + ascentM / 100) / 70) +
-    0.2 * clamp01(caloriesPerBodyKg / 70),
-  );
-  const enduranceIndex = enduranceCategoryIndex(enduranceSeverity);
-  const enduranceCategory = ENDURANCE_CATEGORIES[enduranceIndex];
   const referenceRow = enduranceReferenceRow(
     preview.survey.sex,
     preview.survey.ageYears,
   );
+  const stageSummaries = buildEnduranceStageSummaries(
+    preview,
+    segments,
+    routeDistanceM,
+    movingMinutes,
+    averageSpeedMps,
+    ascentM,
+    metabolic.activeCalories,
+    plannedDays,
+  );
+  let previousAdjustedSeverity = 0;
+  let limitingDay = 1;
+  let enduranceSeverity = 0;
+  const enduranceStages = stageSummaries.map((stage, index) => {
+    const rawSeverity = enduranceSeverityForLoad(stage, preview.survey.bodyWeightKg);
+    const carry = index === 0
+      ? 0
+      : ENDURANCE_OVERNIGHT_CARRY * previousAdjustedSeverity * (1 - rawSeverity);
+    const adjustedSeverity = clamp01(rawSeverity + carry);
+    previousAdjustedSeverity = adjustedSeverity;
+    if (adjustedSeverity > enduranceSeverity) {
+      enduranceSeverity = adjustedSeverity;
+      limitingDay = index + 1;
+    }
+    const band = enduranceBandForSeverity(adjustedSeverity, referenceRow);
+
+    return {
+      day: index + 1,
+      distanceKm: round(stage.distanceM / 1000, 2),
+      movingMinutes: round(stage.movingMinutes, 1),
+      ascentM: round(stage.ascentM),
+      activeCalories: roundTo(stage.activeCalories, 10),
+      rawSeverity: round(rawSeverity, 4),
+      carry: round(carry, 4),
+      adjustedSeverity: round(adjustedSeverity, 4),
+      category: band.category,
+      rangeKind: band.rangeKind,
+      referenceLow: band.referenceLow,
+      referenceHigh: band.referenceHigh,
+    };
+  });
+  const enduranceBand = enduranceBandForSeverity(enduranceSeverity, referenceRow);
+  const enduranceCategory = enduranceBand.category;
+  const enduranceReasons: DemandReasonCode[] = [
+    ...uniqueWarnings,
+    "no-training-history",
+    "heuristic-unvalidated",
+  ];
+  if (tripMode === "multi-day") {
+    enduranceReasons.push("multi-day-balanced-stage-assumption");
+  }
   const endurance = referenceRow
     ? (() => {
-        const referenceLow = enduranceIndex === 0 ? null : referenceRow.starts[enduranceIndex];
-        const referenceHigh = enduranceIndex === 6
-          ? null
-          : referenceRow.starts[enduranceIndex + 1] - 1;
+        const { referenceLow, referenceHigh } = enduranceBand;
         const projectedLow = referenceLow ?? 0;
         const projectedHigh = referenceHigh ?? 10_000;
         const center = (projectedLow + projectedHigh) / 2;
@@ -680,19 +912,11 @@ export function calculateRouteDemand(preview: RoutePreview): RouteDemandAnalysis
           low: projectedLow,
           high: projectedHigh,
           confidence: "low" as const,
-          reasons: uniqueReasons([
-            ...uniqueWarnings,
-            "no-training-history",
-            "heuristic-unvalidated",
-          ]),
+          reasons: uniqueReasons(enduranceReasons),
           dial: projectDial(projectedLow, projectedHigh, 0, 10_000),
           category: enduranceCategory,
           ageBand: referenceRow.label,
-          rangeKind: enduranceIndex === 0
-            ? "less-than" as const
-            : enduranceIndex === 6
-              ? "at-least" as const
-              : "between" as const,
+          rangeKind: enduranceBand.rangeKind,
           referenceLow,
           referenceHigh,
         };
@@ -701,6 +925,9 @@ export function calculateRouteDemand(preview: RoutePreview): RouteDemandAnalysis
         ...unavailable([
           "unsupported-age-reference",
           "no-training-history",
+          ...(tripMode === "multi-day"
+            ? ["multi-day-balanced-stage-assumption" as const]
+            : []),
           "heuristic-unvalidated",
         ]),
         category: enduranceCategory,
@@ -855,6 +1082,14 @@ export function calculateRouteDemand(preview: RoutePreview): RouteDemandAnalysis
     },
     confidence: baseConfidence,
     warnings: uniqueWarnings,
+    endurancePlan: {
+      tripMode,
+      plannedDays,
+      method: tripMode === "multi-day" ? "balanced-modeled-effort" : "single-stage",
+      carryCoefficient: ENDURANCE_OVERNIGHT_CARRY,
+      limitingDay,
+      stages: enduranceStages,
+    },
     features: {
       distanceKm: round(distanceKm, 2),
       movingMinutes,

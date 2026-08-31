@@ -23,6 +23,12 @@ import type {
   ProfileSex,
   RoutePreview,
   TripActivity,
+  TripMode,
+} from "../_lib/route-data";
+import {
+  clampMovingMinutesForPlan,
+  maximumMovingMinutesForPlan,
+  minimumMovingMinutesForPlan,
 } from "../_lib/route-data";
 
 export type ProRouteWorkspaceProps = {
@@ -32,6 +38,8 @@ export type ProRouteWorkspaceProps = {
 
 type ProControlState = {
   activity: TripActivity;
+  tripMode: TripMode;
+  plannedDays: number;
   sex: ProfileSex;
   ageYears: number;
   bodyWeightKg: number;
@@ -93,16 +101,27 @@ function formatMovingTime(totalMinutes: number, language: Track4TrekLanguage) {
 
 function defaultControls(preview: RoutePreview | null): ProControlState {
   const survey = preview?.survey;
+  const tripMode = survey?.tripMode ?? "single-day";
+  const plannedDays = tripMode === "multi-day"
+    ? Math.max(survey?.plannedDays ?? 2, 2)
+    : 1;
+  const requestedMovingMinutes = survey
+    ? survey.movingHours * 60 + survey.movingMinutes
+    : 420;
   return {
     activity: survey?.activity ?? "day-hike",
+    tripMode,
+    plannedDays,
     sex: survey?.sex ?? "male",
     ageYears: survey?.ageYears ?? 25,
     bodyWeightKg: survey?.bodyWeightKg ?? 70,
     heightCm: survey?.heightCm ?? 175,
     packWeightKg: survey?.packWeightKg ?? 5,
-    movingMinutes: survey
-      ? survey.movingHours * 60 + survey.movingMinutes
-      : 420,
+    movingMinutes: clampMovingMinutesForPlan(
+      requestedMovingMinutes,
+      tripMode,
+      plannedDays,
+    ),
     month: 9,
   };
 }
@@ -148,7 +167,26 @@ function scaleRange(
 function labelForActivity(activity: TripActivity, text: (english: string, chinese: string) => string) {
   if (activity === "trail-run") return text("Trail run", "越野跑");
   if (activity === "backpacking") return text("Backpacking", "背包徒步");
-  return text("Day hike", "日间徒步");
+  return text("Hiking", "徒步");
+}
+
+function formatPlannedDays(days: number, language: Track4TrekLanguage) {
+  return language === "zh" ? `${days} 天` : `${days} ${days === 1 ? "day" : "days"}`;
+}
+
+function formatEnduranceReference(
+  stage: RouteDemandAnalysis["endurancePlan"]["stages"][number],
+  language: Track4TrekLanguage,
+) {
+  const number = new Intl.NumberFormat(language === "zh" ? "zh-CN" : "en-US");
+  if (stage.referenceLow == null && stage.referenceHigh == null) return "—";
+  if (stage.rangeKind === "less-than") {
+    return `≤${number.format(stage.referenceHigh ?? 0)}`;
+  }
+  if (stage.rangeKind === "at-least") {
+    return `≥${number.format(stage.referenceLow ?? 0)}`;
+  }
+  return `${number.format(stage.referenceLow ?? 0)}–${number.format(stage.referenceHigh ?? 0)}`;
 }
 
 function formatPace(value: number) {
@@ -718,19 +756,29 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
   );
   const workingPreview = useMemo(() => {
     if (!preview) return null;
-    const movingHours = Math.floor(controls.movingMinutes / 60);
+    const effectivePlannedDays = controls.tripMode === "multi-day"
+      ? Math.max(controls.plannedDays, 2)
+      : 1;
+    const effectiveMovingMinutes = clampMovingMinutesForPlan(
+      controls.movingMinutes,
+      controls.tripMode,
+      effectivePlannedDays,
+    );
+    const movingHours = Math.floor(effectiveMovingMinutes / 60);
     return {
       ...preview,
       survey: {
         ...preview.survey,
         activity: controls.activity,
+        tripMode: controls.tripMode,
+        plannedDays: effectivePlannedDays,
         sex: controls.sex,
         ageYears: controls.ageYears,
         bodyWeightKg: controls.bodyWeightKg,
         heightCm: controls.heightCm,
         packWeightKg: controls.packWeightKg,
         movingHours,
-        movingMinutes: controls.movingMinutes % 60,
+        movingMinutes: effectiveMovingMinutes % 60,
       },
     };
   }, [controls, preview]);
@@ -765,6 +813,50 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
       return {
         previewKey,
         values: { ...currentValues, [key]: value },
+      };
+    });
+  }
+
+  function updateTripMode(nextMode: TripMode) {
+    setControlSnapshot((current) => {
+      const currentValues = current.previewKey === previewKey
+        ? current.values
+        : defaultControls(preview);
+      const rememberedDays = Math.max(currentValues.plannedDays, 2);
+      const effectiveDays = nextMode === "multi-day" ? rememberedDays : 1;
+      return {
+        previewKey,
+        values: {
+          ...currentValues,
+          tripMode: nextMode,
+          plannedDays: rememberedDays,
+          movingMinutes: clampMovingMinutesForPlan(
+            currentValues.movingMinutes,
+            nextMode,
+            effectiveDays,
+          ),
+        },
+      };
+    });
+  }
+
+  function updatePlannedDays(nextDays: number) {
+    setControlSnapshot((current) => {
+      const currentValues = current.previewKey === previewKey
+        ? current.values
+        : defaultControls(preview);
+      const plannedDays = Math.min(Math.max(Math.round(nextDays), 2), 30);
+      return {
+        previewKey,
+        values: {
+          ...currentValues,
+          plannedDays,
+          movingMinutes: clampMovingMinutesForPlan(
+            currentValues.movingMinutes,
+            "multi-day",
+            plannedDays,
+          ),
+        },
       };
     });
   }
@@ -974,6 +1066,28 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
                   onChange={(value) => updateControl("activity", value as TripActivity)}
                 />
                 <ChoiceControl
+                  label={text("Trip length", "行程类型")}
+                  value={controls.tripMode}
+                  options={[
+                    { value: "single-day", label: text("Single", "单日") },
+                    { value: "multi-day", label: text("Multi-day", "多日") },
+                  ]}
+                  onChange={(value) => updateTripMode(value as TripMode)}
+                />
+                {controls.tripMode === "multi-day" ? (
+                  <ProRangeControl
+                    id="pro-planned-days"
+                    label={text("Planned days", "计划天数")}
+                    value={Math.max(controls.plannedDays, 2)}
+                    displayValue={formatPlannedDays(Math.max(controls.plannedDays, 2), language)}
+                    min={2}
+                    max={30}
+                    step={1}
+                    onChange={updatePlannedDays}
+                    text={text}
+                  />
+                ) : null}
+                <ChoiceControl
                   label={text("Gender", "性别")}
                   value={controls.sex}
                   options={[
@@ -984,11 +1098,22 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
                 />
                 <ProRangeControl
                   id="pro-moving-time"
-                  label={text("Moving time", "移动时间")}
+                  label={text("Total moving time", "全程移动时间")}
                   value={controls.movingMinutes}
-                  displayValue={formatMovingTime(controls.movingMinutes, language)}
-                  min={15}
-                  max={48 * 60}
+                  displayValue={controls.tripMode === "multi-day"
+                    ? text(
+                        `${formatMovingTime(controls.movingMinutes, language)} total · ${formatMovingTime(Math.round(controls.movingMinutes / Math.max(controls.plannedDays, 2)), language)} avg/day`,
+                        `${formatMovingTime(controls.movingMinutes, language)} 全程 · 日均 ${formatMovingTime(Math.round(controls.movingMinutes / Math.max(controls.plannedDays, 2)), language)}`,
+                      )
+                    : formatMovingTime(controls.movingMinutes, language)}
+                  min={minimumMovingMinutesForPlan(
+                    controls.tripMode,
+                    controls.tripMode === "multi-day" ? Math.max(controls.plannedDays, 2) : 1,
+                  )}
+                  max={maximumMovingMinutesForPlan(
+                    controls.tripMode,
+                    controls.tripMode === "multi-day" ? Math.max(controls.plannedDays, 2) : 1,
+                  )}
                   step={15}
                   onChange={(value) => updateControl("movingMinutes", value)}
                   text={text}
@@ -1052,13 +1177,18 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
               </p>
             </div>
 
-            <div className="pro-dashboard-outputs" aria-live="polite">
+            <div className="pro-dashboard-outputs">
               <div className="pro-output-heading">
                 <div>
                   <p className="pro-eyebrow">{text("Output", "输出")}</p>
                   <h3>{text("Route demand", "路线需求")}</h3>
                 </div>
-                <span>{labelForActivity(controls.activity, text)} · {selectedMonth}</span>
+                <span role="status" aria-live="polite" aria-atomic="true">
+                  {labelForActivity(controls.activity, text)} · {formatPlannedDays(
+                    controls.tripMode === "multi-day" ? Math.max(controls.plannedDays, 2) : 1,
+                    language,
+                  )} · {selectedMonth}
+                </span>
               </div>
               <div className="pro-output-group">
                 <h4>{text("Capability metrics", "能力指标")}</h4>
@@ -1076,6 +1206,73 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
                   ))}
                 </div>
               </div>
+              {demandAnalysis?.status === "estimated" &&
+              demandAnalysis.endurancePlan.tripMode === "multi-day" ? (
+                <section className="pro-endurance-stages" aria-labelledby="pro-endurance-stages-title">
+                  <div>
+                    <h4 id="pro-endurance-stages-title">
+                      {text("Daily endurance stages", "每日耐力阶段")}
+                    </h4>
+                    <span>
+                      {text(
+                        "Balanced modeled effort · limiting day ",
+                        "均衡模型负荷 · 限制日 ",
+                      )}
+                      {demandAnalysis.endurancePlan.limitingDay}
+                    </span>
+                  </div>
+                  <div
+                    className="pro-endurance-stage-table-wrap"
+                    tabIndex={0}
+                    aria-label={text(
+                      "Scrollable daily endurance stage table",
+                      "可滚动的每日耐力阶段表格",
+                    )}
+                  >
+                    <table className="pro-endurance-stage-table">
+                      <caption className="visually-hidden">
+                        {text(
+                          "Modeled daily endurance stages and baseline reference ranges",
+                          "每日耐力模型阶段与基准参考范围",
+                        )}
+                      </caption>
+                      <thead>
+                        <tr>
+                          <th scope="col">{text("Day", "天")}</th>
+                          <th scope="col">{text("Distance", "距离")}</th>
+                          <th scope="col">{text("Moving", "移动")}</th>
+                          <th scope="col">{text("Ascent", "爬升")}</th>
+                          <th scope="col">{text("Baseline range", "基准范围")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {demandAnalysis.endurancePlan.stages.map((stage) => (
+                          <tr key={stage.day} data-limiting={stage.day === demandAnalysis.endurancePlan.limitingDay}>
+                            <td>
+                              {String(stage.day).padStart(2, "0")}
+                              {stage.day === demandAnalysis.endurancePlan.limitingDay ? (
+                                <span className="visually-hidden">
+                                  {text(" — limiting day", " — 限制日")}
+                                </span>
+                              ) : null}
+                            </td>
+                            <td>{formatNumber(stage.distanceKm, language, 1)} km</td>
+                            <td>{formatMovingTime(Math.round(stage.movingMinutes), language)}</td>
+                            <td>+{formatNumber(stage.ascentM, language, 0)} m</td>
+                            <td>{formatEnduranceReference(stage, language)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p>
+                    {text(
+                      "The GPX has no campsite boundaries, so stages are balanced by modeled effort. Daily rows are the pre-weather baseline; the selected month adjusts the dial. A bounded 0.35 overnight carry combines consecutive days.",
+                      "GPX 不含营地边界，因此按模型负荷均衡分段。每日行显示天气修正前的基准值；所选月份会调整仪表。连续天数使用有上限的 0.35 隔夜承接系数。",
+                    )}
+                  </p>
+                </section>
+              ) : null}
               <p className="pro-output-note">
                 {text(
                   "Every change is calculated locally from the same GPX. Weather fields update when the route providers respond; unavailable fields keep the seasonal baseline.",

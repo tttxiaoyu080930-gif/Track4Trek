@@ -1373,6 +1373,25 @@ button { color: inherit; }
   gap: 20px;
 }
 
+.survey-schedule-row {
+  margin-top: 22px;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(130px, 0.35fr);
+  align-items: end;
+  gap: 18px 24px;
+}
+
+.survey-schedule-row > p {
+  grid-column: 1 / -1;
+  margin: -7px 0 0;
+  color: var(--muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.survey-days-control { min-width: 0; }
+
 .compact-grid {
   grid-template-columns: minmax(210px, 1.35fr) repeat(4, minmax(92px, 0.7fr));
   padding: 24px 0 0;
@@ -1445,6 +1464,8 @@ button { color: inherit; }
   .sample-route-option { min-height: 62px; }
   .survey-glass { padding: 30px 24px; border-radius: 30px; }
   .survey-choice-groups { grid-template-columns: 1fr; gap: 18px; }
+  .survey-schedule-row { grid-template-columns: 1fr; gap: 14px; }
+  .survey-schedule-row > p { grid-column: auto; margin-top: -2px; }
   .compact-grid { grid-template-columns: 1fr; gap: 14px; }
   .survey-submit { width: 100%; margin-top: 28px; }
 }
@@ -5544,6 +5565,70 @@ html[data-track4trek-theme="light"] .elevation-profile-canvas {
   font-family: var(--font-geist-mono), monospace;
   font-size: 10px;
 }
+
+.pro-endurance-stages {
+  padding: 24px 0 4px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.pro-endurance-stages > div:first-child {
+  margin-bottom: 14px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.pro-endurance-stages h4 {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.pro-endurance-stages > div:first-child > span,
+.pro-endurance-stages > p {
+  color: var(--muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.pro-endurance-stages > p { margin: 14px 0 18px; }
+
+.pro-endurance-stage-table-wrap {
+  overflow-x: auto;
+}
+
+.pro-endurance-stage-table-wrap:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--orange) 72%, transparent);
+  outline-offset: 5px;
+}
+
+.pro-endurance-stage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.pro-endurance-stage-table th,
+.pro-endurance-stage-table td {
+  padding: 9px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: right;
+}
+
+.pro-endurance-stage-table th:first-child,
+.pro-endurance-stage-table td:first-child { padding-left: 0; text-align: left; }
+.pro-endurance-stage-table th:last-child,
+.pro-endurance-stage-table td:last-child { padding-right: 0; }
+.pro-endurance-stage-table th { color: var(--muted); font-size: 8px; font-weight: 600; text-transform: uppercase; }
+.pro-endurance-stage-table tr[data-limiting="true"] td { color: var(--orange-light); }
 
 html[data-track4trek-theme="light"] .pro-data-table,
 html[data-track4trek-theme="light"] .pro-chart-frame {

@@ -5,6 +5,8 @@ import { calculateProRouteAnalysis } from "../app/_lib/pro-route-analysis.ts";
 
 const BASE_SURVEY = {
   activity: "day-hike",
+  tripMode: "single-day",
+  plannedDays: 1,
   sex: "male",
   ageYears: 30,
   bodyWeightKg: 70,
@@ -48,7 +50,7 @@ function makePreview({
   const lowest = elevations.length ? Math.min(...elevations) : null;
 
   const preview = {
-    version: 3,
+    version: 4,
     fileName,
     createdAt: "2026-08-30T00:00:00.000Z",
     survey: { ...BASE_SURVEY, ...survey },

@@ -2,9 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { calculateRouteDemand } from "../app/_lib/route-demand.ts";
+import {
+  maximumMovingMinutesForPlan,
+  minimumMovingMinutesForPlan,
+  readRoutePreview,
+  ROUTE_PREVIEW_STORAGE_KEY,
+} from "../app/_lib/route-data.ts";
 
 const BASE_SURVEY = {
   activity: "day-hike",
+  tripMode: "single-day",
+  plannedDays: 1,
   sex: "male",
   ageYears: 30,
   bodyWeightKg: 70,
@@ -42,7 +50,7 @@ function routePreview({
   const movingMinutes = resolvedSurvey.movingHours * 60 + resolvedSurvey.movingMinutes;
 
   return {
-    version: 3,
+    version: 4,
     fileName: "fixture.gpx",
     createdAt: "2026-08-30T00:00:00.000Z",
     survey: resolvedSurvey,
@@ -166,6 +174,171 @@ test("longer duration raises the endurance-duration requirement", () => {
   }));
 
   assert.ok(long.features.enduranceSeverity > short.features.enduranceSeverity);
+});
+
+test("explicit single-day plans preserve the legacy calculator result", () => {
+  const explicit = routePreview();
+  const legacyShape = routePreview();
+  delete legacyShape.survey.tripMode;
+  delete legacyShape.survey.plannedDays;
+
+  assert.deepEqual(calculateRouteDemand(explicit), calculateRouteDemand(legacyShape));
+});
+
+test("multi-day routes use separate balanced stages instead of one continuous effort", () => {
+  const route = {
+    survey: { movingHours: 48 },
+    profile: [
+      [0, 600],
+      [20, 1800],
+      [40, 900],
+      [60, 2500],
+      [80, 1300],
+      [100, 2900],
+    ],
+  };
+  const continuous = calculateRouteDemand(routePreview({
+    ...route,
+    survey: { ...route.survey, tripMode: "single-day", plannedDays: 1 },
+  }));
+  const expedition = calculateRouteDemand(routePreview({
+    ...route,
+    survey: { ...route.survey, tripMode: "multi-day", plannedDays: 5 },
+  }));
+
+  assert.equal(expedition.endurancePlan.method, "balanced-modeled-effort");
+  assert.equal(expedition.endurancePlan.stages.length, 5);
+  assert.ok(
+    expedition.features.enduranceSeverity < continuous.features.enduranceSeverity,
+    "a five-day plan should not be modeled as a continuous 48-hour effort",
+  );
+  assert.ok(expedition.features.enduranceSeverity > 0);
+});
+
+test("multi-day stage totals are conserved and overnight carry stays bounded", () => {
+  const analysis = calculateRouteDemand(routePreview({
+    survey: { tripMode: "multi-day", plannedDays: 7, movingHours: 56 },
+    profile: [
+      [0, 400],
+      [15, 1400],
+      [30, 750],
+      [50, 2200],
+      [70, 900],
+      [90, 2600],
+    ],
+  }));
+  const stages = analysis.endurancePlan.stages;
+  const sum = (key) => stages.reduce((total, stage) => total + stage[key], 0);
+  const maxRaw = Math.max(...stages.map((stage) => stage.rawSeverity));
+  const maxAdjusted = Math.max(...stages.map((stage) => stage.adjustedSeverity));
+
+  assert.equal(stages.length, 7);
+  assert.ok(Math.abs(sum("distanceKm") - analysis.features.distanceKm) <= 0.08);
+  assert.ok(Math.abs(sum("movingMinutes") - analysis.features.movingMinutes) <= 0.8);
+  assert.ok(Math.abs(sum("ascentM") - analysis.features.ascentM) <= 7);
+  assert.ok(
+    Math.abs(sum("activeCalories") - analysis.features.activeCaloriesCenter) <= 70,
+  );
+  assert.ok(maxAdjusted >= maxRaw);
+  assert.ok(maxAdjusted <= 1);
+  assert.ok(stages.every((stage) => stage.carry >= 0 && stage.carry <= 0.35));
+  assert.ok(stages.every((stage) => {
+    const distanceShare = stage.distanceKm / analysis.features.distanceKm;
+    const timeShare = stage.movingMinutes / analysis.features.movingMinutes;
+    return Math.abs(distanceShare - timeShare) <= 0.001;
+  }), "daily time must preserve the whole-route target pace");
+  assert.equal(
+    analysis.endurancePlan.limitingDay,
+    stages.find((stage) => stage.adjustedSeverity === maxAdjusted)?.day,
+  );
+});
+
+test("moving-time limits follow the selected single-day or multi-day plan", () => {
+  assert.equal(minimumMovingMinutesForPlan("single-day", 1), 15);
+  assert.equal(maximumMovingMinutesForPlan("single-day", 1), 48 * 60);
+  assert.equal(minimumMovingMinutesForPlan("multi-day", 5), 75);
+  assert.equal(maximumMovingMinutesForPlan("multi-day", 5), 5 * 24 * 60);
+  assert.equal(minimumMovingMinutesForPlan("multi-day", 30), 450);
+  assert.equal(maximumMovingMinutesForPlan("multi-day", 30), 480 * 60);
+});
+
+test("stored route previews reject moving times outside the selected plan", () => {
+  const originalWindow = globalThis.window;
+  let raw = "";
+  globalThis.window = {
+    localStorage: {
+      getItem: () => raw,
+      setItem: (_key, value) => { raw = value; },
+    },
+  };
+
+  try {
+    const invalidPlans = [
+      routePreview({ survey: { movingHours: 49 } }),
+      routePreview({
+        survey: {
+          tripMode: "multi-day",
+          plannedDays: 30,
+          movingHours: 7,
+          movingMinutes: 0,
+        },
+      }),
+      routePreview({
+        survey: {
+          tripMode: "multi-day",
+          plannedDays: 2,
+          movingHours: 49,
+        },
+      }),
+    ];
+
+    for (const preview of invalidPlans) {
+      raw = JSON.stringify(preview);
+      assert.equal(readRoutePreview(), null);
+    }
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test("multi-day stages do not invent Garmin reference numbers for unsupported ages", () => {
+  const analysis = calculateRouteDemand(routePreview({
+    survey: {
+      ageYears: 16,
+      tripMode: "multi-day",
+      plannedDays: 3,
+      movingHours: 18,
+    },
+  }));
+
+  assert.equal(analysis.metrics.endurance.status, "unavailable");
+  assert.ok(analysis.endurancePlan.stages.every(
+    (stage) => stage.referenceLow == null && stage.referenceHigh == null,
+  ));
+});
+
+test("legacy v3 previews migrate to an explicit single-day plan", () => {
+  const legacy = routePreview();
+  legacy.version = 3;
+  delete legacy.survey.tripMode;
+  delete legacy.survey.plannedDays;
+  const storage = new Map([[ROUTE_PREVIEW_STORAGE_KEY, JSON.stringify(legacy)]]);
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, value),
+    },
+  };
+
+  try {
+    const migrated = readRoutePreview();
+    assert.equal(migrated?.version, 4);
+    assert.equal(migrated?.survey.tripMode, "single-day");
+    assert.equal(migrated?.survey.plannedDays, 1);
+  } finally {
+    globalThis.window = originalWindow;
+  }
 });
 
 test("age and sex select reference tables without changing active calories", () => {

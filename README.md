@@ -1,6 +1,6 @@
 # Track4Trek
 
-Track4Trek is an open geospatial engineering project for answering a practical question: **what will this route ask of me?** A user uploads a GPX route, chooses an activity and target moving time, and enters a small personal profile. The application extracts route geometry and recorded elevation, then produces transparent route-demand ranges, a route-specific seasonal weather baseline, a short live forecast, expected active calories, and a conservative recovery window.
+Track4Trek is an open geospatial engineering project for answering a practical question: **what will this route ask of me?** A user uploads a GPX route, chooses an activity, a single-day or multi-day plan, total moving time, and a small personal profile. The application extracts route geometry and recorded elevation, then produces transparent route-demand ranges, a route-specific seasonal weather baseline, a short live forecast, expected active calories, and a conservative recovery window.
 
 Public project domain: [siuyuk.xyz](https://siuyuk.xyz)
 
@@ -13,7 +13,7 @@ The project is now beyond the original visual-only prototype:
 - GPX files are parsed locally in the browser; no route file is uploaded to a Track4Trek server.
 - The landing page includes a lazy-loaded library of five real sample routes for users without a GPX file.
 - Route distance, ascent, descent, elevation range, required pace, vertical speed, elevation profile, and geographic segments are derived from the file.
-- The trip survey stores activity, target moving time, gender selection, age, body weight, height, and backpack weight in kilograms.
+- The trip survey stores activity, single-day/multi-day structure, planned days, total moving time, gender selection, age, body weight, height, and backpack weight in kilograms.
 - The result page renders the route on a real interactive 3D terrain map using MapLibre GL JS.
 - Terrain and DEM-derived contour lines use the same cached Mapterhorn elevation tiles.
 - Users can switch between contour rendering and the real map without remounting the map.
@@ -21,7 +21,7 @@ The project is now beyond the original visual-only prototype:
 - Overview weather combines a twelve-month NASA POWER climatology baseline with a sampled Open-Meteo forecast when providers respond.
 - Pro weather exposes the representative coordinates, all monthly index columns, route-wide daily fields, sampled hourly fields, and atmospheric inputs used by the derived indices.
 
-The route-demand outputs are now connected to the saved route and survey through the versioned, deterministic `route-demand-v0.1` calculator. The results page reads the browser-stored `RoutePreview` once after hydration, calculates one analysis object, and passes that same object to all six dials:
+The route-demand outputs are now connected to the saved route and survey through the versioned, deterministic `route-demand-v0.2` calculator. The results page reads the browser-stored `RoutePreview` once after hydration, calculates one analysis object, and passes that same object to all six dials:
 
 - Hill Score capability range
 - Endurance Score reference range
@@ -30,21 +30,25 @@ The route-demand outputs are now connected to the saved route and survey through
 - Active-calorie range
 - Recovery-time window
 
-These are Track4Trek route-demand estimates informed by Garmin's published reference material; they are not official Garmin measurements or a reverse-engineered Garmin algorithm. Confidence fields and reason codes remain in the model for audit and are documented below, but are deliberately not shown as labels in the website interface. The overview is ordered as map, elevation profile, month-sensitive conditions, four capability metrics, and the post-activity calorie/recovery forecast. A separate Pro mode exposes a restrained GPX inspector with file counts, geometry, elevation statistics, grade distribution, extrema, separated segments, field availability, and resizable elevation/gradient charts. Its local dashboard recalculates all six outputs when activity, profile inputs, or starting month changes. Weather factors are bounded planning proxies and never replace an official forecast.
+These are Track4Trek route-demand estimates informed by Garmin's published reference material; they are not official Garmin measurements or a reverse-engineered Garmin algorithm. Confidence fields and reason codes remain in the model for audit and are documented below, but are deliberately not shown as labels in the website interface. The overview is ordered as map, elevation profile, month-sensitive conditions, four capability metrics, and the post-activity calorie/recovery forecast. A separate Pro mode exposes a restrained GPX inspector with file counts, geometry, elevation statistics, grade distribution, extrema, separated segments, field availability, and resizable elevation/gradient charts. Its local dashboard recalculates all six outputs when activity, trip structure, planned days, profile inputs, or starting month changes. Multi-day Pro output also lists every estimated daily Endurance stage and the limiting day. Weather factors are bounded planning proxies and never replace an official forecast.
 
 ## Survey schema
 
 | Input | Unit/options | Current use |
 | --- | --- | --- |
 | Activity | Hike, trail run, backpack | Select the appropriate movement-energy model |
-| Target moving time | Hours and minutes | Convert route geometry into required pace and sustained effort |
+| Trip structure | Single day or multi-day | Choose continuous Endurance modeling or daily-stage modeling |
+| Planned days | Integer, 2–30 for multi-day | Set the number of contiguous modeled daily stages |
+| Total moving time | Hours and minutes | Convert route geometry into required pace and distribute moving time across the full itinerary; plan-aware limits prevent impossible single-day or per-day durations |
 | Gender | Male or female | Select Garmin Endurance/VO₂ reference classifications; not used to invent metabolic demand or calories |
 | Age | Years | Select age-specific reference bands |
 | Body weight | kg | Convert oxygen/energy cost into calories |
 | Height | cm | Profile context and future validation; it is not an invented multiplier in the current research model |
 | Backpack weight | kg | Estimate the additional metabolic cost of carried load |
 
-The profile is stored with the parsed preview in browser `localStorage`. Survey schema version 3 replaces older previews because missing body and pack values should not be guessed.
+The profile is stored with the parsed preview in browser `localStorage`. Survey schema version 4 adds the trip structure and planned-day count. A valid version 3 preview is migrated in memory to `single-day` with `plannedDays: 1`; the stored GPX is not silently reclassified as a multi-day trip.
+
+The accepted moving-time window is 15 minutes to 48 hours for a single day. A multi-day plan requires at least 15 minutes per planned day and allows at most 24 hours per planned day, capped at 480 total hours. These are input-sanity boundaries, not recommended daily hiking durations.
 
 ## Algorithm research and design
 
@@ -100,7 +104,7 @@ Crun(i)  = 155.4i⁵ − 30.4i⁴ − 43.3i³ + 46.3i² + 19.5i + 3.6
 | Output | Transparent Track4Trek method | Important limitation |
 | --- | --- | --- |
 | Hill Score range | Combine ascent/km, longest continuous climb, 90th-percentile positive grade, uphill share, vertical speed and highest elevation, then map the normalized route severity to Garmin's published 1–100 category bands | Garmin's Hill Score is an athlete-history metric. A route can only suggest a capability range. |
-| Endurance Score range | Combine target duration, distance, ascent and modeled active energy, then select the matching published Garmin age/sex reference band | Official Endurance Score also requires VO₂ max and 2-week to 3-month training history. |
+| Endurance Score range | For one day, combine duration, distance, ascent and modeled active energy. For multi-day plans, calculate every balanced daily stage separately, apply bounded overnight carry, and map the limiting adjusted day to Garmin's published age/sex reference band. | The GPX has no campsite boundaries, and official Endurance Score also requires VO₂ max and 2-week to 3-month training history. |
 | VO₂ max route-capacity range | Integrate segment oxygen demand, apply a bounded duration reserve and the documented acute-altitude availability factor, then widen the result by a documented uncertainty margin | This is required route capacity, not a measurement of the user's VO₂ max. |
 | Lactate-threshold pace range | For trail runs lasting at least 20 minutes, convert the grade-adjusted oxygen requirement into a flat-equivalent pace window | Age and body size alone cannot predict personal lactate threshold. A measured threshold pace or heart rate is needed for personal comparison. Hikes and shorter runs show no value. |
 | Active calories | Integrate active oxygen cost by segment for hiking/backpacking; use the Minetti running-energy candidate for trail running, with the selected movement and carried load | Terrain and pack effects are estimates; this will not exactly match Garmin's proprietary calculation. Minetti did not validate backpacks, so a nonzero trail-running pack is outside that source boundary. |
@@ -108,7 +112,27 @@ Crun(i)  = 155.4i⁵ − 30.4i⁴ − 43.3i³ + 46.3i² + 19.5i + 3.6
 
 For running, net metabolic power can be converted to oxygen demand using approximately `60 × watts-per-kg / 20.9`, then adding resting oxygen cost for a gross estimate. The current duration reserve uses the bounded candidate `f = (940 − T_minutes) / 1000` for efforts longer than ten minutes; its use in this prototype still requires external validation and should not be attributed as an official Minetti formula. An acute-altitude candidate reduces available VO₂ max by about 6.3% per 1,000 m above 300 m, but the supporting study only covered 300–2,800 m in eight trained, unacclimatized athletes. These limitations will be carried into the output uncertainty.
 
-### 6. Recovery research boundary
+### 6. Multi-day Endurance model
+
+The former calculator passed the total duration, distance, ascent and energy of an expedition into one continuous-effort equation. A five-day trek could therefore look like a 50-hour nonstop activity and saturate the highest Endurance category. `route-demand-v0.2` keeps the single-day equation unchanged and treats multi-day plans differently:
+
+1. estimate each ordered route segment's energy at the whole-route target pace;
+2. split the GPX into `N` contiguous stages with approximately equal modeled effort, proportionally dividing a segment when a stage boundary falls inside it;
+3. preserve the whole-route target pace by distributing moving time by distance, distribute active energy by modeled-effort share, preserve total route distance, and scale stage ascent so the daily totals match the GPX ascent summary;
+4. calculate each day's raw severity `sᵢ` with the existing duration/distance/ascent/energy equation;
+5. apply a bounded carry from the preceding day and use the hardest adjusted day for the final reference band.
+
+```text
+A₁ = s₁
+Aᵢ = sᵢ + 0.35 × Aᵢ₋₁ × (1 − sᵢ)
+trip severity = max(A₁ … Aₙ)
+```
+
+All raw and adjusted values are clamped to `[0, 1]`. The recurrence lets incomplete overnight recovery matter but saturates instead of increasing without limit. `0.35` is a named Track4Trek planning calibration, not a Garmin parameter or a physiological constant; a future validation study should test at least the `0.25–0.45` sensitivity range. Besson et al. found different fatigue and recovery patterns when the same mountain course was completed continuously versus over four successive stages, which motivates modeling the formats separately. Straight et al. found residual effects across repeated load-carriage bouts, but its 14 male soldiers carried unusually heavy loads of 30–50% of body mass. Morton et al.'s impulse-response framework supports only the qualitative idea of recurrent, decaying fatigue; it does not model overnight trekking recovery or supply the `0.35` coefficient. These studies establish model direction—not a universal trekking coefficient.
+
+Because ordinary GPX files do not mark camps, food stops, sleep, or planned stage boundaries, the current split assumes balanced modeled-effort days. The Pro table makes that assumption auditable. Actual camp locations, rest, nutrition, sleep, weather, terrain surface, and training history can change the hardest day substantially.
+
+### 7. Recovery research boundary
 
 If a current VO₂ max is available, segment effort can be normalized to oxygen reserve and summarized with Banister TRIMP:
 
@@ -121,7 +145,7 @@ women:  A = 0.86, B = 1.67
 
 `x` is relative exercise intensity. TRIMP is useful for ranking training load, but published research does not provide a universal TRIMP-to-recovery-hours equation. Until Track4Trek has validation data, the recovery output remains a broad, low-confidence heuristic. The 96-hour ceiling is only a presentation boundary comparable to Garmin's display, not Garmin's algorithm.
 
-### 7. Confidence and validation plan
+### 8. Confidence and validation plan
 
 Every calculated result includes an internal confidence level and machine-readable reasons for uncertainty. Those fields support auditing and future calibration; the current website intentionally keeps them out of the visible dial labels. The implementation and validation plan is:
 
@@ -129,10 +153,10 @@ Every calculated result includes an internal confidence level and machine-readab
 - **Low confidence** is assigned when elevation is missing or partial, a grade is clamped, speed/load/altitude is outside a source study, or the result depends on information the survey does not collect.
 - Hill and Endurance ranges remain low confidence because Garmin's official scores depend on athlete history that a route file cannot provide.
 - Recovery remains low confidence because there is no validated route-to-recovery-hours equation and Track4Trek does not yet have heart rate, recent training, sleep, stress or current-recovery data.
-- `route-demand-v0.1` does not assign a **high confidence** level to any output. That level should only be introduced after external validation and interval calibration.
+- `route-demand-v0.2` does not assign a **high confidence** level to any output. That level should only be introduced after external validation and interval calibration.
 - Height is collected for profile completeness but is currently not used as a metabolic multiplier.
 
-The stored reason codes include missing or partial elevation, clamped grade, speed/load/altitude outside the cited studies, unsupported age references, threshold inapplicability, missing heart-rate or training-history data, and an unvalidated-heuristic marker.
+The stored reason codes include missing or partial elevation, clamped grade, speed/load/altitude outside the cited studies, unsupported age references, threshold inapplicability, missing heart-rate or training-history data, the balanced multi-day stage assumption, and an unvalidated-heuristic marker.
 
 - unit-test monotonic behavior: more mass, steeper climbing or shorter target time must not reduce predicted demand;
 - compare known routes across flat, rolling, mountainous and high-altitude conditions;
@@ -163,7 +187,9 @@ Primary academic sources:
 - Faude et al., [Lactate-threshold concepts and methodological limitations](https://doi.org/10.2165/00007256-200939060-00003)
 - Tanaka et al., [Age-predicted maximal heart-rate equation](https://doi.org/10.1016/S0735-1097(00)01054-8)
 - Swain & Leutholtz, [Relationship between oxygen-reserve and heart-rate-reserve intensity](https://doi.org/10.1097/00005768-199703000-00018)
-- Morton et al., [Training impulse and the impulse-response model](https://doi.org/10.1152/jappl.1990.69.3.1171)
+- Besson et al., [Fatigue and Recovery after Single-Stage versus Multistage Ultramarathon Running](https://doi.org/10.1249/MSS.0000000000002303)
+- Straight et al., [Repeated bouts of load carriage alter indirect markers of exercise-induced muscle damage, liver enzymes, and oxygen-carrying capacity in male soldiers](https://doi.org/10.14814/phy2.70268)
+- Morton et al., [Modeling human performance in running](https://doi.org/10.1152/jappl.1990.69.3.1171)
 
 ## Technology and data
 
@@ -192,7 +218,7 @@ Open [http://localhost:3000](http://localhost:3000). Before publishing, run:
 ```bash
 pnpm run lint
 pnpm run build
-  node --test tests/route-demand.test.mjs tests/pro-route-analysis.test.mjs tests/weather-model.test.mjs tests/rendered-html.test.mjs
+node --test tests/route-demand.test.mjs tests/pro-route-analysis.test.mjs tests/weather-model.test.mjs tests/rendered-html.test.mjs
 pnpm run build:vercel
 ```
 

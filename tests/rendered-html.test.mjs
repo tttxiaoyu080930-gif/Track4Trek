@@ -87,11 +87,21 @@ test("trip survey stores a numeric personal profile without a date field", async
   assert.match(intakeSource, /name="bodyWeightKg"\s+type="number"/);
   assert.match(intakeSource, /name="heightCm"\s+type="number"/);
   assert.match(intakeSource, /name="packWeightKg"\s+type="number"/);
+  assert.match(intakeSource, /name="tripMode"/);
+  assert.match(intakeSource, /name="plannedDays"/);
+  assert.match(intakeSource, /"single-day"[\s\S]*"multi-day"/);
+  assert.match(intakeSource, /text\("Total moving time", "全程移动时间"\)/);
   assert.match(intakeSource, /text\("kg", "公斤"\)/);
   assert.doesNotMatch(intakeSource, /type="date"|plannedDate|name="packLoad"/);
 
   assert.match(routeDataSource, /export type ProfileSex = "male" \| "female"/);
-  assert.match(routeDataSource, /version: 3/);
+  assert.match(routeDataSource, /version: 4/);
+  assert.match(routeDataSource, /export type TripMode = "single-day" \| "multi-day"/);
+  assert.match(routeDataSource, /minimumMovingMinutesForPlan/);
+  assert.match(routeDataSource, /maximumMovingMinutesForPlan/);
+  assert.match(routeDataSource, /value\.version === 3/);
+  assert.match(routeDataSource, /tripMode: "single-day"/);
+  assert.match(routeDataSource, /plannedDays: 1/);
   assert.match(routeDataSource, /bodyWeightKg: number/);
   assert.match(routeDataSource, /packWeightKg: number/);
   assert.match(routeDataSource, /value\.survey\.ageYears < 13/);
@@ -259,6 +269,14 @@ test("server-renders the real-map result flow, metric wheels, forecasts, and not
   assert.match(proWorkspaceSource, /id="pro-month"/);
   assert.match(proWorkspaceSource, /function ProMonthControl/);
   assert.match(proWorkspaceSource, /text\("Starting month", "出发月份"\)/);
+  assert.match(proWorkspaceSource, /text\("Trip length", "行程类型"\)/);
+  assert.match(proWorkspaceSource, /id="pro-planned-days"/);
+  assert.match(proWorkspaceSource, /label=\{text\("Total moving time", "全程移动时间"\)\}/);
+  assert.match(proWorkspaceSource, /className="pro-endurance-stages"/);
+  assert.match(proWorkspaceSource, /demandAnalysis\.endurancePlan\.stages\.map/);
+  assert.match(proWorkspaceSource, /<caption className="visually-hidden">/);
+  assert.match(proWorkspaceSource, /<th scope="col">/);
+  assert.doesNotMatch(proWorkspaceSource, /className="pro-dashboard-outputs" aria-live/);
   assert.match(proWorkspaceSource, /pro-month-options/);
   assert.match(proWorkspaceSource, /data-pro-seasonal-factor/);
   assert.match(proWorkspaceSource, /MONTHLY_STRESS/);

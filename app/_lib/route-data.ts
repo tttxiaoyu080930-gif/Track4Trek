@@ -2,9 +2,51 @@ export const ROUTE_PREVIEW_STORAGE_KEY = "track4trek:route-preview";
 
 export type TripActivity = "day-hike" | "trail-run" | "backpacking";
 export type ProfileSex = "male" | "female";
+export type TripMode = "single-day" | "multi-day";
+export const MIN_MOVING_MINUTES_PER_DAY = 15;
+export const MAX_SINGLE_DAY_MOVING_MINUTES = 48 * 60;
+export const MAX_MULTI_DAY_MOVING_MINUTES = 480 * 60;
+
+export function minimumMovingMinutesForPlan(
+  tripMode: TripMode,
+  plannedDays: number,
+) {
+  if (tripMode === "single-day") return MIN_MOVING_MINUTES_PER_DAY;
+  const normalizedDays = Number.isFinite(plannedDays)
+    ? Math.min(Math.max(Math.round(plannedDays), 2), 30)
+    : 2;
+  return normalizedDays * MIN_MOVING_MINUTES_PER_DAY;
+}
+
+export function maximumMovingMinutesForPlan(
+  tripMode: TripMode,
+  plannedDays: number,
+) {
+  if (tripMode === "single-day") return MAX_SINGLE_DAY_MOVING_MINUTES;
+  const normalizedDays = Number.isFinite(plannedDays)
+    ? Math.min(Math.max(Math.round(plannedDays), 2), 30)
+    : 2;
+  return Math.min(MAX_MULTI_DAY_MOVING_MINUTES, normalizedDays * 24 * 60);
+}
+
+export function clampMovingMinutesForPlan(
+  movingMinutes: number,
+  tripMode: TripMode,
+  plannedDays: number,
+) {
+  return Math.min(
+    Math.max(
+      Math.round(movingMinutes),
+      minimumMovingMinutesForPlan(tripMode, plannedDays),
+    ),
+    maximumMovingMinutesForPlan(tripMode, plannedDays),
+  );
+}
 
 export type SurveyInput = {
   activity: TripActivity;
+  tripMode: TripMode;
+  plannedDays: number;
   sex: ProfileSex;
   ageYears: number;
   bodyWeightKg: number;
@@ -40,7 +82,7 @@ export type PreviewGeographicPoint = {
 };
 
 export type RoutePreview = {
-  version: 1 | 2 | 3;
+  version: 4;
   fileName: string;
   createdAt: string;
   survey: SurveyInput;
@@ -412,7 +454,7 @@ export function parseGpxRoute(
   );
 
   return {
-    version: 3,
+    version: 4,
     fileName,
     createdAt: new Date().toISOString(),
     survey,
@@ -466,16 +508,42 @@ function isStoredGeographicPoint(value: unknown): value is PreviewGeographicPoin
     isOptionalElevation(value.elevationM);
 }
 
+function normalizeStoredRoutePreview(value: unknown): unknown {
+  if (!isRecord(value) || !isRecord(value.survey)) return value;
+
+  if (value.version === 3) {
+    return {
+      ...value,
+      version: 4,
+      survey: {
+        ...value.survey,
+        tripMode: "single-day",
+        plannedDays: 1,
+      },
+    };
+  }
+
+  return value;
+}
+
 function isStoredRoutePreview(value: unknown): value is RoutePreview {
-  if (!isRecord(value) || value.version !== 3) return false;
+  if (!isRecord(value) || value.version !== 4) return false;
   if (typeof value.fileName !== "string" || typeof value.createdAt !== "string") return false;
   if (!isRecord(value.survey) || !isRecord(value.source) || !isRecord(value.stats)) return false;
   if (!Array.isArray(value.mapPath) || !value.mapPath.every(isStoredMapPoint)) return false;
 
   const activity = value.survey.activity;
+  const tripMode = value.survey.tripMode;
   const sex = value.survey.sex;
   if (
     !["day-hike", "trail-run", "backpacking"].includes(String(activity)) ||
+    !["single-day", "multi-day"].includes(String(tripMode)) ||
+    !isFiniteNumber(value.survey.plannedDays) ||
+    !Number.isInteger(value.survey.plannedDays) ||
+    value.survey.plannedDays < 1 ||
+    value.survey.plannedDays > 30 ||
+    (tripMode === "single-day" && value.survey.plannedDays !== 1) ||
+    (tripMode === "multi-day" && value.survey.plannedDays < 2) ||
     !["male", "female"].includes(String(sex)) ||
     !isFiniteNumber(value.survey.ageYears) ||
     !Number.isInteger(value.survey.ageYears) ||
@@ -493,13 +561,21 @@ function isStoredRoutePreview(value: unknown): value is RoutePreview {
     !isFiniteNumber(value.survey.movingHours) ||
     !Number.isInteger(value.survey.movingHours) ||
     value.survey.movingHours < 0 ||
-    value.survey.movingHours > 48 ||
+    value.survey.movingHours > MAX_MULTI_DAY_MOVING_MINUTES / 60 ||
     !isFiniteNumber(value.survey.movingMinutes) ||
     !Number.isInteger(value.survey.movingMinutes) ||
     value.survey.movingMinutes < 0 ||
     value.survey.movingMinutes > 59 ||
-    value.survey.movingHours * 60 + value.survey.movingMinutes < 1 ||
-    value.survey.movingHours * 60 + value.survey.movingMinutes > 48 * 60
+    value.survey.movingHours * 60 + value.survey.movingMinutes <
+      minimumMovingMinutesForPlan(
+        tripMode as TripMode,
+        value.survey.plannedDays,
+      ) ||
+    value.survey.movingHours * 60 + value.survey.movingMinutes >
+      maximumMovingMinutesForPlan(
+        tripMode as TripMode,
+        value.survey.plannedDays,
+      )
   ) return false;
 
   if (
@@ -538,7 +614,8 @@ export function readRoutePreview() {
 
   try {
     const parsed: unknown = JSON.parse(raw);
-    return isStoredRoutePreview(parsed) ? parsed : null;
+    const normalized = normalizeStoredRoutePreview(parsed);
+    return isStoredRoutePreview(normalized) ? normalized : null;
   } catch {
     return null;
   }
