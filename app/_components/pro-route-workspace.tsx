@@ -15,9 +15,13 @@ import {
   calculateRouteDemand,
   type RouteDemandAnalysis,
 } from "../_lib/route-demand";
+import { calculateComprehensiveRouteDifficulty } from "../_lib/route-difficulty";
+import { calculateMonthlySurfaceCondition } from "../_lib/surface";
 import { monthlyWeather } from "../_lib/weather";
 import { ProWeatherWorkspace } from "./pro-weather-workspace";
 import { useRouteWeather } from "./use-route-weather";
+import { useRouteSurface } from "./use-route-surface";
+import { ChartXPan, ChartXZoom } from "./chart-x-zoom";
 import type {
   PreviewElevationPoint,
   ProfileSex,
@@ -378,11 +382,34 @@ type ProChartProps = {
   points: PreviewElevationPoint[];
   mode: "elevation" | "grade";
   height: number;
+  zoom: number;
+  pan: number;
   analysis: ProRouteAnalysis;
   text: (english: string, chinese: string) => string;
 };
 
-function ProChart({ points, mode, height, analysis, text }: ProChartProps) {
+function pointAtDistance(points: PreviewElevationPoint[], distanceKm: number) {
+  if (distanceKm <= points[0].distanceKm) return { ...points[0], distanceKm };
+  if (distanceKm >= points.at(-1)!.distanceKm) return { ...points.at(-1)!, distanceKm };
+  const rightIndex = points.findIndex((point) => point.distanceKm >= distanceKm);
+  const leftPoint = points[Math.max(rightIndex - 1, 0)];
+  const rightPoint = points[rightIndex];
+  const span = Math.max(rightPoint.distanceKm - leftPoint.distanceKm, 0.000001);
+  const ratio = clamp((distanceKm - leftPoint.distanceKm) / span, 0, 1);
+  const leftGrade = gradeForPoint(leftPoint, points[Math.max(rightIndex - 2, 0)]);
+  const rightGrade = gradeForPoint(rightPoint, leftPoint);
+  return {
+    distanceKm,
+    elevationM: leftPoint.elevationM +
+      (rightPoint.elevationM - leftPoint.elevationM) * ratio,
+    gradePercent: leftGrade != null && rightGrade != null
+      ? leftGrade + (rightGrade - leftGrade) * ratio
+      : undefined,
+  };
+}
+
+function ProChart({ points, mode, height, zoom, pan, analysis, text }: ProChartProps) {
+  const [activePointIndex, setActivePointIndex] = useState<number | null>(null);
   const validPoints = points
     .filter((point) => Number.isFinite(point.distanceKm) && Number.isFinite(point.elevationM))
     .toSorted((a, b) => a.distanceKm - b.distanceKm);
@@ -402,24 +429,38 @@ function ProChart({ points, mode, height, analysis, text }: ProChartProps) {
   const plotWidth = right - left;
   const plotHeight = bottom - top;
   const totalDistance = Math.max(analysis.distanceKm, validPoints.at(-1)?.distanceKm ?? 0.001);
-  const elevations = validPoints.map((point) => point.elevationM);
+  const visibleDistance = totalDistance / Math.max(zoom, 1);
+  const visibleStart = (totalDistance - visibleDistance) * clamp(pan, 0, 1);
+  const visibleEnd = visibleStart + visibleDistance;
+  const visiblePoints = [
+    pointAtDistance(validPoints, visibleStart),
+    ...validPoints.filter((point) =>
+      point.distanceKm > visibleStart && point.distanceKm < visibleEnd),
+    pointAtDistance(validPoints, visibleEnd),
+  ].filter((point, index, entries) =>
+    index === 0 || Math.abs(point.distanceKm - entries[index - 1].distanceKm) > 0.000001);
+  const elevations = visiblePoints.map((point) => point.elevationM);
   const lowest = Math.min(...elevations);
   const highest = Math.max(...elevations);
   const elevationSpan = Math.max(highest - lowest, 1);
-  const grades = validPoints
-    .map((point, index) => gradeForPoint(point, validPoints[index - 1]))
+  const grades = visiblePoints
+    .map((point, index) => gradeForPoint(point, visiblePoints[index - 1]))
     .filter((grade): grade is number => grade != null);
   const gradeDomain = Math.max(
     5,
     Math.ceil(Math.max(Math.abs(Math.min(...grades, 0)), Math.abs(Math.max(...grades, 0))) / 5) * 5,
   );
   const xFor = (distanceKm: number) =>
-    left + clamp(distanceKm / totalDistance, 0, 1) * plotWidth;
+    left + clamp(
+      (distanceKm - visibleStart) / Math.max(visibleEnd - visibleStart, 0.000001),
+      0,
+      1,
+    ) * plotWidth;
   const yForElevation = (elevation: number) =>
     top + ((highest + elevationSpan * 0.1 - elevation) / (elevationSpan * 1.2)) * plotHeight;
   const zeroY = top + plotHeight / 2;
   const yForGrade = (grade: number) => zeroY - (grade / gradeDomain) * (plotHeight / 2);
-  const barWidth = Math.max(1.1, Math.min(7, plotWidth / validPoints.length * 0.62));
+  const barWidth = Math.max(1.1, Math.min(9, plotWidth / visiblePoints.length * 0.62));
   const highestIndex = elevations.reduce(
     (selected, elevation, index) => elevation > elevations[selected] ? index : selected,
     0,
@@ -430,11 +471,38 @@ function ProChart({ points, mode, height, analysis, text }: ProChartProps) {
   );
   const stroke = mode === "elevation" ? "#ffad68" : "#62c9e8";
   const labelColor = "currentColor";
+  const activePoint = activePointIndex == null
+    ? null
+    : visiblePoints[activePointIndex] ?? null;
+  const activeGrade = activePoint == null
+    ? null
+    : gradeForPoint(activePoint, visiblePoints[Math.max(activePointIndex! - 1, 0)]);
+  const activeX = activePoint ? xFor(activePoint.distanceKm) : 0;
+  const activeY = activePoint
+    ? mode === "elevation"
+      ? yForElevation(activePoint.elevationM)
+      : activeGrade == null ? zeroY : yForGrade(activeGrade)
+    : 0;
+
+  const selectPointFromClientX = (clientX: number, bounds: DOMRect) => {
+    const viewBoxX = ((clientX - bounds.left) / Math.max(bounds.width, 1)) * width;
+    const targetDistance = visibleStart +
+      clamp((viewBoxX - left) / plotWidth, 0, 1) * (visibleEnd - visibleStart);
+    let nearestIndex = 0;
+    visiblePoints.forEach((point, index) => {
+      if (
+        Math.abs(point.distanceKm - targetDistance) <
+        Math.abs(visiblePoints[nearestIndex].distanceKm - targetDistance)
+      ) nearestIndex = index;
+    });
+    setActivePointIndex(nearestIndex);
+  };
 
   return (
     <svg
       className="pro-chart-svg"
-      role="img"
+      role="application"
+      tabIndex={0}
       aria-label={mode === "elevation"
         ? text(
             `Elevation profile over ${totalDistance.toFixed(1)} kilometres.`,
@@ -447,6 +515,22 @@ function ProChart({ points, mode, height, analysis, text }: ProChartProps) {
       viewBox={`0 0 ${width} 360`}
       style={{ height: `${height}px` } as CSSProperties}
       preserveAspectRatio="none"
+      onPointerMove={(event) =>
+        selectPointFromClientX(event.clientX, event.currentTarget.getBoundingClientRect())}
+      onPointerLeave={() => setActivePointIndex(null)}
+      onFocus={() => {
+        if (activePointIndex == null) setActivePointIndex(Math.floor(visiblePoints.length / 2));
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        const current = activePointIndex ?? Math.floor(visiblePoints.length / 2);
+        setActivePointIndex(clamp(
+          current + (event.key === "ArrowLeft" ? -1 : 1),
+          0,
+          visiblePoints.length - 1,
+        ));
+      }}
     >
       {Array.from({ length: 5 }, (_, index) => {
         const ratio = index / 4;
@@ -465,7 +549,7 @@ function ProChart({ points, mode, height, analysis, text }: ProChartProps) {
       })}
 
       {mode === "elevation"
-        ? validPoints.map((point, index) => {
+        ? visiblePoints.map((point, index) => {
             const x = xFor(point.distanceKm);
             const y = yForElevation(point.elevationM);
             return (
@@ -480,8 +564,8 @@ function ProChart({ points, mode, height, analysis, text }: ProChartProps) {
               />
             );
           })
-        : validPoints.map((point, index) => {
-            const grade = gradeForPoint(point, validPoints[index - 1]);
+        : visiblePoints.map((point, index) => {
+            const grade = gradeForPoint(point, visiblePoints[index - 1]);
             if (grade == null) return null;
             const x = xFor(point.distanceKm);
             const y = yForGrade(grade);
@@ -506,51 +590,51 @@ function ProChart({ points, mode, height, analysis, text }: ProChartProps) {
         <>
           <line
             className="pro-chart-marker-line"
-            x1={xFor(validPoints[highestIndex].distanceKm)}
-            x2={xFor(validPoints[highestIndex].distanceKm)}
+            x1={xFor(visiblePoints[highestIndex].distanceKm)}
+            x2={xFor(visiblePoints[highestIndex].distanceKm)}
             y1={top}
             y2={bottom}
             stroke={stroke}
           />
           <circle
             className="pro-chart-marker-dot"
-            cx={xFor(validPoints[highestIndex].distanceKm)}
-            cy={yForElevation(validPoints[highestIndex].elevationM)}
+            cx={xFor(visiblePoints[highestIndex].distanceKm)}
+            cy={yForElevation(visiblePoints[highestIndex].elevationM)}
             r="5"
             fill={stroke}
           />
           <text
             className="pro-chart-marker-label"
-            x={xFor(validPoints[highestIndex].distanceKm)}
+            x={xFor(visiblePoints[highestIndex].distanceKm)}
             y={top - 10}
             textAnchor="middle"
             fill={labelColor}
           >
-            {text(`HIGH ${Math.round(validPoints[highestIndex].elevationM)} m`, `最高 ${Math.round(validPoints[highestIndex].elevationM)} 米`)}
+            {text(`HIGH ${Math.round(visiblePoints[highestIndex].elevationM)} m`, `最高 ${Math.round(visiblePoints[highestIndex].elevationM)} 米`)}
           </text>
           <line
             className="pro-chart-marker-line pro-chart-marker-line-low"
-            x1={xFor(validPoints[lowestIndex].distanceKm)}
-            x2={xFor(validPoints[lowestIndex].distanceKm)}
+            x1={xFor(visiblePoints[lowestIndex].distanceKm)}
+            x2={xFor(visiblePoints[lowestIndex].distanceKm)}
             y1={top}
             y2={bottom}
             stroke="#72c9dc"
           />
           <circle
             className="pro-chart-marker-dot"
-            cx={xFor(validPoints[lowestIndex].distanceKm)}
-            cy={yForElevation(validPoints[lowestIndex].elevationM)}
+            cx={xFor(visiblePoints[lowestIndex].distanceKm)}
+            cy={yForElevation(visiblePoints[lowestIndex].elevationM)}
             r="5"
             fill="#72c9dc"
           />
           <text
             className="pro-chart-marker-label"
-            x={xFor(validPoints[lowestIndex].distanceKm)}
+            x={xFor(visiblePoints[lowestIndex].distanceKm)}
             y={bottom + 28}
             textAnchor="middle"
             fill={labelColor}
           >
-            {text(`LOW ${Math.round(validPoints[lowestIndex].elevationM)} m`, `最低 ${Math.round(validPoints[lowestIndex].elevationM)} 米`)}
+            {text(`LOW ${Math.round(visiblePoints[lowestIndex].elevationM)} m`, `最低 ${Math.round(visiblePoints[lowestIndex].elevationM)} 米`)}
           </text>
         </>
       ) : null}
@@ -563,9 +647,27 @@ function ProChart({ points, mode, height, analysis, text }: ProChartProps) {
           y={bottom + 28}
           textAnchor={ratio === 0 ? "start" : ratio === 1 ? "end" : "middle"}
         >
-          {(totalDistance * ratio).toFixed(ratio === 0 ? 0 : 1)} km
+          {(visibleStart + (visibleEnd - visibleStart) * ratio).toFixed(ratio === 0 ? 0 : 1)} km
         </text>
       ))}
+
+      {activePoint ? (
+        <g className="pro-chart-active-point" aria-hidden="true">
+          <line x1={activeX} x2={activeX} y1={top} y2={bottom} />
+          <circle cx={activeX} cy={activeY} r="6" />
+          <g transform={`translate(${clamp(activeX, left + 82, right - 82)} ${top + 9})`}>
+            <rect x="-78" y="0" width="156" height="48" rx="9" />
+            <text x="0" y="18" textAnchor="middle">
+              {activePoint.distanceKm.toFixed(2)} km
+            </text>
+            <text className="pro-chart-active-value" x="0" y="36" textAnchor="middle">
+              {mode === "elevation"
+                ? `${Math.round(activePoint.elevationM)} m`
+                : `${activeGrade == null ? "—" : `${activeGrade >= 0 ? "+" : "−"}${Math.abs(activeGrade).toFixed(1)}%`}`}
+            </text>
+          </g>
+        </g>
+      ) : null}
     </svg>
   );
 }
@@ -733,8 +835,11 @@ function segmentRows(analysis: ProRouteAnalysis, language: Track4TrekLanguage, t
 export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
   const { language, text } = useLanguage();
   const weather = useRouteWeather(preview);
+  const surface = useRouteSurface(preview);
   const [chartMode, setChartMode] = useState<"elevation" | "grade">("elevation");
   const [chartHeight, setChartHeight] = useState(360);
+  const [chartXZoom, setChartXZoom] = useState(1);
+  const [chartXPan, setChartXPan] = useState(0.5);
   const previewKey = preview == null ? "none" : `${preview.fileName}:${preview.createdAt}`;
   const [controlSnapshot, setControlSnapshot] = useState<{
     previewKey: string;
@@ -786,13 +891,35 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
     () => (workingPreview ? calculateRouteDemand(workingPreview) : null),
     [workingPreview],
   );
-  const weatherDifficulty = weather.data
-    ? monthlyWeather(weather.data, controls.month)?.indices.difficulty ?? 50
-    : 50;
+  const selectedWeather = weather.data
+    ? monthlyWeather(weather.data, controls.month)
+    : null;
+  const selectedSurfaceCondition = selectedWeather
+    ? calculateMonthlySurfaceCondition(surface.data, selectedWeather)
+    : null;
   const seasonalFallbackFactor = MONTHLY_STRESS[controls.month - 1] ?? 1;
-  const weatherFactor = weather.data && weather.data.monthly.length >= 12
-    ? clamp(1 + (weatherDifficulty - 50) * 0.004, 0.82, 1.22)
-    : seasonalFallbackFactor;
+  const seasonalFallbackDifficulty = clamp(
+    50 + (seasonalFallbackFactor - 1) / 0.004,
+    0,
+    100,
+  );
+  const weatherDifficulty = selectedWeather?.indices.difficulty ?? seasonalFallbackDifficulty;
+  const weatherFactor = clamp(1 + (weatherDifficulty / 100) * 0.22, 1, 1.22);
+  const comprehensiveDifficulty = calculateComprehensiveRouteDifficulty(
+    demandAnalysis,
+    selectedWeather?.indices ?? {
+      difficulty: weatherDifficulty,
+      heat: 0,
+      snow: 0,
+      storm: 0,
+      precipitation: 0,
+      visibility: 100,
+      wind: 0,
+      uv: 0,
+      cold: 0,
+    },
+    selectedSurfaceCondition,
+  );
   const outputDials = useMemo(
     () => buildOutputDials(demandAnalysis, controls, language, text, status, weatherFactor),
     [controls, demandAnalysis, language, status, text, weatherFactor],
@@ -804,6 +931,18 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
   const selectedMonth = monthName(controls.month, language);
   const selectedStress = weatherFactor;
   const profilePoints = preview?.elevationProfile ?? [];
+  const profileDistance = Math.max(
+    technical?.distanceKm ?? 0,
+    profilePoints.at(-1)?.distanceKm ?? 0,
+    0.001,
+  );
+  const proVisibleDistance = profileDistance / chartXZoom;
+  const proVisibleStart = (profileDistance - proVisibleDistance) * chartXPan;
+  const proVisibleEnd = proVisibleStart + proVisibleDistance;
+  const proVisibleRangeLabel = text(
+    `${proVisibleStart.toFixed(1)}–${proVisibleEnd.toFixed(1)} km visible`,
+    `显示 ${proVisibleStart.toFixed(1)}–${proVisibleEnd.toFixed(1)} 公里`,
+  );
 
   function updateControl<K extends keyof ProControlState>(key: K, value: ProControlState[K]) {
     setControlSnapshot((current) => {
@@ -946,7 +1085,17 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
                   { label: text("Route closure", "路线闭合"), value: technical.endpointGapKm == null ? "—" : `${technical.endpointGapKm} km gap` },
                   { label: text("North / south span", "南北跨度"), value: technical.northSouthExtentKm == null ? "—" : `${technical.northSouthExtentKm} km` },
                   { label: text("East / west span", "东西跨度"), value: technical.eastWestExtentKm == null ? "—" : `${technical.eastWestExtentKm} km` },
-                  { label: text("Trail surface", "步道表面"), value: text("Not encoded in GPX", "GPX 未记录") },
+                  {
+                    label: text("Trail surface", "步道表面"),
+                    value: surface.status === "loading"
+                      ? text("Matching map data…", "正在匹配地图数据…")
+                      : surface.data?.source === "openstreetmap"
+                        ? `${surface.data.mappedCoveragePct}% ${text("corridor matched", "路线走廊已匹配")}`
+                        : text("Map data unavailable", "地图数据不可用"),
+                    detail: surface.data?.source === "openstreetmap"
+                      ? `${surface.data.explicitSurfaceTagPct}% ${text("with an explicit surface tag", "具有明确路面标签")}`
+                      : text("Surface is not encoded in the GPX", "GPX 本身不包含路面信息"),
+                  },
                 ]}
               />
             </div>
@@ -981,6 +1130,16 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
                     onChange={(event) => setChartHeight(Number(event.target.value))}
                   />
                 </label>
+                <ChartXZoom
+                  id="pro-profile-x-zoom"
+                  label={text("Horizontal scale", "水平缩放")}
+                  zoom={chartXZoom}
+                  visibleRange={proVisibleRangeLabel}
+                  onChange={(value) => {
+                    setChartXZoom(value);
+                    setChartXPan(0.5);
+                  }}
+                />
               </div>
             </div>
             <div className="pro-chart-frame">
@@ -988,10 +1147,21 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
                 points={profilePoints}
                 mode={chartMode}
                 height={chartHeight}
+                zoom={chartXZoom}
+                pan={chartXPan}
                 analysis={technical}
                 text={text}
               />
             </div>
+            <ChartXPan
+              id="pro-profile-x-pan"
+              label={text("Move visible range", "左右移动显示范围")}
+              position={chartXPan}
+              disabled={chartXZoom <= 1}
+              disabledText={text("Zoom in to pan", "放大后可左右移动")}
+              visibleRange={proVisibleRangeLabel}
+              onChange={setChartXPan}
+            />
             <div className="pro-profile-readout">
               <span>{text("P90 climb", "上坡 P90")}: {technical.p90AscentPct == null ? "—" : `+${technical.p90AscentPct}%`}</span>
               <span>{text("P10 descent", "下坡 P10")}: {technical.p90DescentPct == null ? "—" : `${technical.p90DescentPct}%`}</span>
@@ -1035,7 +1205,7 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
             )}
             <div className="pro-external-note">
               <strong>{text("Not in the GPX", "GPX 未包含")}</strong>
-              <span>{text("Trail surface, named trail class, access rules, weather and corrected DEM values require separate map or weather providers.", "步道表面、步道类别、通行规则、天气和校正 DEM 数值需要额外的地图或天气服务。")}</span>
+              <span>{text("Named trail class, access rules and corrected DEM values require separate map providers. Surface composition is now matched separately from OpenStreetMap where tags are available.", "命名步道类别、通行规则和校正 DEM 数值需要额外地图服务；路面组成现会在标签可用时另行匹配 OpenStreetMap。")}</span>
             </div>
           </section>
 
@@ -1190,6 +1360,41 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
                   )} · {selectedMonth}
                 </span>
               </div>
+              <section className="pro-difficulty-audit" aria-labelledby="pro-difficulty-title">
+                <div className="pro-difficulty-score">
+                  <span>{text("Comprehensive difficulty", "综合难度")}</span>
+                  <strong id="pro-difficulty-title">{comprehensiveDifficulty.score}<small>/100</small></strong>
+                  <small>{text(
+                    `Intrinsic ${comprehensiveDifficulty.baseScore - comprehensiveDifficulty.surfaceAdjustment} + surface ${comprehensiveDifficulty.surfaceAdjustment} + weather ${comprehensiveDifficulty.weatherAdjustment}`,
+                    `路线本身 ${comprehensiveDifficulty.baseScore - comprehensiveDifficulty.surfaceAdjustment} + 路面 ${comprehensiveDifficulty.surfaceAdjustment} + 天气 ${comprehensiveDifficulty.weatherAdjustment}`,
+                  )}</small>
+                </div>
+                <div className="pro-difficulty-components">
+                  {([
+                    [text("Endurance", "耐力"), comprehensiveDifficulty.components.endurance],
+                    [text("Terrain", "地形"), comprehensiveDifficulty.components.terrain],
+                    [text("Aerobic", "有氧"), comprehensiveDifficulty.components.aerobic],
+                    [text("Altitude", "海拔"), comprehensiveDifficulty.components.altitude],
+                    [text("Pack", "负重"), comprehensiveDifficulty.components.carriedLoad],
+                    [text("Surface", "路面"), comprehensiveDifficulty.components.surface],
+                    [text("Weather", "天气"), comprehensiveDifficulty.components.weather],
+                  ] as const).map(([label, value]) => (
+                    <div key={label} style={{ "--pro-factor": `${value}%` } as CSSProperties}>
+                      <span>{label}</span><strong>{value}</strong><i aria-hidden="true" />
+                    </div>
+                  ))}
+                </div>
+                <dl className="pro-altitude-audit">
+                  <div><dt>{text("Mean / high", "平均 / 最高")}</dt><dd>{formatNumber(comprehensiveDifficulty.altitude.meanElevationM, language, 0)} / {formatNumber(comprehensiveDifficulty.altitude.highestElevationM, language, 0)} m</dd></div>
+                  <div><dt>{text("Acute capacity retained", "急性能力保留")}</dt><dd>{formatNumber(comprehensiveDifficulty.altitude.acuteAvailabilityPct, language, 1)}%</dd></div>
+                  <div><dt>{text("Distance >2,500 m", "高于 2,500 米路程")}</dt><dd>{formatNumber(comprehensiveDifficulty.altitude.distanceAbove2500Pct, language, 1)}%</dd></div>
+                  <div><dt>{text("Distance >4,000 m", "高于 4,000 米路程")}</dt><dd>{formatNumber(comprehensiveDifficulty.altitude.distanceAbove4000Pct, language, 1)}%</dd></div>
+                </dl>
+                <p>{text(
+                  "Acute, unacclimatized planning reference. It is not an altitude-illness forecast.",
+                  "急性、未适应海拔的规划参考；并非高原病预测。",
+                )}</p>
+              </section>
               <div className="pro-output-group">
                 <h4>{text("Capability metrics", "能力指标")}</h4>
                 <div className="pro-output-grid">
@@ -1242,6 +1447,7 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
                           <th scope="col">{text("Distance", "距离")}</th>
                           <th scope="col">{text("Moving", "移动")}</th>
                           <th scope="col">{text("Ascent", "爬升")}</th>
+                          <th scope="col">{text("Mean altitude", "平均海拔")}</th>
                           <th scope="col">{text("Baseline range", "基准范围")}</th>
                         </tr>
                       </thead>
@@ -1259,6 +1465,7 @@ export function ProRouteWorkspace({ status, preview }: ProRouteWorkspaceProps) {
                             <td>{formatNumber(stage.distanceKm, language, 1)} km</td>
                             <td>{formatMovingTime(Math.round(stage.movingMinutes), language)}</td>
                             <td>+{formatNumber(stage.ascentM, language, 0)} m</td>
+                            <td>{formatNumber(stage.meanElevationM, language, 0)} m · {formatNumber(stage.altitudeAvailabilityPct, language, 1)}%</td>
                             <td>{formatEnduranceReference(stage, language)}</td>
                           </tr>
                         ))}

@@ -1,6 +1,6 @@
 import type { ProfileSex, RoutePreview, TripActivity, TripMode } from "./route-data";
 
-export const ROUTE_DEMAND_MODEL_VERSION = "route-demand-v0.2" as const;
+export const ROUTE_DEMAND_MODEL_VERSION = "route-demand-v0.3" as const;
 export const ENDURANCE_OVERNIGHT_CARRY = 0.35;
 
 export type EstimateStatus = "estimated" | "outside-model" | "unavailable";
@@ -95,6 +95,8 @@ export type RouteDemandAnalysis = {
       movingMinutes: number;
       ascentM: number;
       activeCalories: number;
+      meanElevationM: number;
+      altitudeAvailabilityPct: number;
       rawSeverity: number;
       carry: number;
       adjustedSeverity: number;
@@ -116,6 +118,13 @@ export type RouteDemandAnalysis = {
     uphillDistanceShare: number;
     meanElevationM: number;
     highestElevationM: number;
+    acuteAltitudeAvailability: number;
+    altitudePerformanceLossPct: number;
+    distanceAbove2500Pct: number;
+    distanceAbove3000Pct: number;
+    distanceAbove4000Pct: number;
+    altitudeSeverity: number;
+    packRatio: number;
     elevationCoverage: number;
     grossOxygenMlKgMin: number;
     activeCaloriesCenter: number;
@@ -238,6 +247,20 @@ function clamp01(value: number) {
 
 function ramp(value: number, start: number, end: number) {
   return clamp01((value - start) / Math.max(end - start, Number.EPSILON));
+}
+
+/**
+ * Distance-segment estimate of acute aerobic capacity retained at altitude.
+ * The 6.3% / 1,000 m slope follows Wehrlin & Hallen's 300–2,800 m chamber
+ * study. Values above that evidence range are deliberately bounded rather
+ * than presented as a medical or acclimatization prediction.
+ */
+export function acuteAltitudeAvailability(elevationM: number) {
+  return clamp(
+    1 - (0.063 * Math.max(elevationM - 300, 0)) / 1000,
+    0.65,
+    1,
+  );
 }
 
 function round(value: number, decimals = 1) {
@@ -472,6 +495,7 @@ type EnduranceStageSummary = {
   ascentM: number;
   movingMinutes: number;
   activeCalories: number;
+  elevationDistanceM: number;
 };
 
 function enduranceSeverityForLoad(
@@ -481,11 +505,13 @@ function enduranceSeverityForLoad(
   const movingHours = stage.movingMinutes / 60;
   const distanceKm = stage.distanceM / 1000;
   const caloriesPerBodyKg = stage.activeCalories / Math.max(bodyWeightKg, 1);
+  const meanElevationM = stage.elevationDistanceM / Math.max(stage.distanceM, 1);
+  const altitudeStrain = 1 / acuteAltitudeAvailability(meanElevationM);
 
   return clamp01(
-    0.5 * clamp01(movingHours / 14) +
-    0.3 * clamp01((distanceKm + stage.ascentM / 100) / 70) +
-    0.2 * clamp01(caloriesPerBodyKg / 70),
+    0.5 * clamp01((movingHours * altitudeStrain) / 14) +
+    0.3 * clamp01(((distanceKm + stage.ascentM / 100) * altitudeStrain) / 70) +
+    0.2 * clamp01((caloriesPerBodyKg * altitudeStrain) / 70),
   );
 }
 
@@ -521,6 +547,10 @@ function buildEnduranceStageSummaries(
       ascentM,
       movingMinutes,
       activeCalories,
+      elevationDistanceM: segments.reduce(
+        (total, segment) => total + segment.meanElevationM * segment.distanceM,
+        0,
+      ),
     }];
   }
 
@@ -536,7 +566,8 @@ function buildEnduranceStageSummaries(
     ).activeCalories;
     return {
       segment,
-      weight: Math.max(segmentCalories, segment.distanceM / 10_000),
+      weight: Math.max(segmentCalories, segment.distanceM / 10_000) /
+        acuteAltitudeAvailability(segment.meanElevationM),
     };
   });
   const totalWeight = weightedSegments.reduce((total, entry) => total + entry.weight, 0);
@@ -544,6 +575,7 @@ function buildEnduranceStageSummaries(
   const bins = Array.from({ length: plannedDays }, () => ({
     distanceM: 0,
     rawAscentM: 0,
+    elevationDistanceM: 0,
     weight: 0,
   }));
   let stageIndex = 0;
@@ -561,6 +593,8 @@ function buildEnduranceStageSummaries(
 
       bin.distanceM += entry.segment.distanceM * takenFraction;
       bin.rawAscentM += Math.max(entry.segment.riseM, 0) * takenFraction;
+      bin.elevationDistanceM +=
+        entry.segment.meanElevationM * entry.segment.distanceM * takenFraction;
       bin.weight += takenWeight;
       remainingFraction = Math.max(remainingFraction - takenFraction, 0);
 
@@ -588,6 +622,7 @@ function buildEnduranceStageSummaries(
       // allocated by the modeled-effort boundaries.
       movingMinutes: movingMinutes * distanceShare,
       activeCalories: activeCalories * effortShare,
+      elevationDistanceM: bin.elevationDistanceM * distanceScale,
     };
   });
 
@@ -732,6 +767,13 @@ function emptyAnalysis(preview: RoutePreview): RouteDemandAnalysis {
       uphillDistanceShare: 0,
       meanElevationM: 0,
       highestElevationM: 0,
+      acuteAltitudeAvailability: 1,
+      altitudePerformanceLossPct: 0,
+      distanceAbove2500Pct: 0,
+      distanceAbove3000Pct: 0,
+      distanceAbove4000Pct: 0,
+      altitudeSeverity: 0,
+      packRatio: 0,
       elevationCoverage: 0,
       grossOxygenMlKgMin: 0,
       activeCaloriesCenter: 0,
@@ -778,6 +820,33 @@ export function calculateRouteDemand(preview: RoutePreview): RouteDemandAnalysis
         0,
       ) / segmentDistanceM
     : 0;
+  const altitudeAvailability = hasElevationProfile && segmentDistanceM > 0
+    ? segments.reduce(
+        (total, segment) =>
+          total + acuteAltitudeAvailability(segment.meanElevationM) * segment.distanceM,
+        0,
+      ) / segmentDistanceM
+    : 1;
+  const altitudePerformanceLossPct = (1 - altitudeAvailability) * 100;
+  const distanceShareAbove = (thresholdM: number) => hasElevationProfile
+    ? segments.reduce(
+        (total, segment) =>
+          total + (segment.meanElevationM >= thresholdM ? segment.distanceM : 0),
+        0,
+      ) / Math.max(segmentDistanceM, 1)
+    : 0;
+  const distanceAbove2500 = distanceShareAbove(2500);
+  const distanceAbove3000 = distanceShareAbove(3000);
+  const distanceAbove4000 = distanceShareAbove(4000);
+  const altitudeSeverity = hasElevationProfile
+    ? clamp01(
+        0.55 * ramp(altitudePerformanceLossPct, 3, 25) +
+        0.25 * distanceAbove2500 +
+        0.2 * ramp(highestElevationM, 2500, 5000),
+      )
+    : 0;
+  const packRatio = preview.survey.packWeightKg /
+    Math.max(preview.survey.bodyWeightKg, 1);
   const ascentPerKm = ascentM / Math.max(distanceKm, 0.001);
   const verticalSpeedMPerHour = ascentM / Math.max(movingHours, 0.001);
   const longestClimbM = longestContinuousClimb(segments);
@@ -793,7 +862,7 @@ export function calculateRouteDemand(preview: RoutePreview): RouteDemandAnalysis
   const warnings: DemandReasonCode[] = [];
   if (!hasElevationProfile) warnings.push("missing-elevation");
   else if (elevationCoverage < 0.85) warnings.push("partial-elevation");
-  if (meanElevationM > 2800) warnings.push("altitude-outside-study");
+  if (highestElevationM > 2800) warnings.push("altitude-outside-study");
 
   const metabolic = calculateMetabolicDemand(
     preview,
@@ -819,12 +888,13 @@ export function calculateRouteDemand(preview: RoutePreview): RouteDemandAnalysis
     uniqueWarnings.length || !hasElevationProfile ? "low" : "medium";
 
   const hillSeverity = clamp01(
-    0.25 * ramp(ascentPerKm, 15, 120) +
-    0.23 * ramp(verticalSpeedMPerHour, 100, 800) +
-    0.18 * ramp(longestClimbM, 80, 1200) +
-    0.14 * ramp(p90PositiveGrade, 3, 20) +
-    0.1 * ramp(uphillDistanceShare, 0.1, 0.65) +
-    0.1 * ramp(highestElevationM, 1000, 3500),
+    0.22 * ramp(ascentPerKm, 15, 120) +
+    0.2 * ramp(verticalSpeedMPerHour, 100, 800) +
+    0.16 * ramp(longestClimbM, 80, 1200) +
+    0.12 * ramp(p90PositiveGrade, 3, 20) +
+    0.08 * ramp(uphillDistanceShare, 0.1, 0.65) +
+    0.07 * ramp(highestElevationM, 1000, 3500) +
+    0.15 * altitudeSeverity,
   );
   const selectedHillBand = hillBandForSeverity(hillSeverity);
   const hill = hasElevationProfile
@@ -881,6 +951,13 @@ export function calculateRouteDemand(preview: RoutePreview): RouteDemandAnalysis
       movingMinutes: round(stage.movingMinutes, 1),
       ascentM: round(stage.ascentM),
       activeCalories: roundTo(stage.activeCalories, 10),
+      meanElevationM: round(stage.elevationDistanceM / Math.max(stage.distanceM, 1)),
+      altitudeAvailabilityPct: round(
+        acuteAltitudeAvailability(
+          stage.elevationDistanceM / Math.max(stage.distanceM, 1),
+        ) * 100,
+        1,
+      ),
       rawSeverity: round(rawSeverity, 4),
       carry: round(carry, 4),
       adjustedSeverity: round(adjustedSeverity, 4),
@@ -939,15 +1016,10 @@ export function calculateRouteDemand(preview: RoutePreview): RouteDemandAnalysis
     0.46,
     0.9,
   );
-  const altitudeAvailability = clamp(
-    1 - (0.063 * Math.max(meanElevationM - 300, 0)) / 1000,
-    0.65,
-    1,
-  );
   let uncertainty = 0.15;
   if (!hasElevationProfile || elevationCoverage < 0.85) uncertainty += 0.08;
   if (metabolic.reasons.length) uncertainty += 0.05;
-  if (meanElevationM > 2800) uncertainty += 0.05;
+  if (highestElevationM > 2800) uncertainty += 0.05;
   uncertainty = clamp(uncertainty, 0.15, 0.35);
 
   const vo2Center = clamp(
@@ -996,7 +1068,7 @@ export function calculateRouteDemand(preview: RoutePreview): RouteDemandAnalysis
     const qThreshold = metabolic.grossOxygenMlKgMin /
       (sustainableThresholdFraction * altitudeAvailability);
     const thresholdUncertainty = clamp(
-      0.12 + (metabolic.reasons.length ? 0.05 : 0) + (meanElevationM > 2800 ? 0.05 : 0),
+      0.12 + (metabolic.reasons.length ? 0.05 : 0) + (highestElevationM > 2800 ? 0.05 : 0),
       0.12,
       0.3,
     );
@@ -1049,7 +1121,7 @@ export function calculateRouteDemand(preview: RoutePreview): RouteDemandAnalysis
     6 +
       0.65 * caloriesPerBodyKg +
       0.75 * movingHours +
-      4 * ramp(meanElevationM, 1500, 3500),
+      8 * altitudeSeverity,
     6,
     72,
   );
@@ -1102,6 +1174,13 @@ export function calculateRouteDemand(preview: RoutePreview): RouteDemandAnalysis
       uphillDistanceShare: round(uphillDistanceShare, 3),
       meanElevationM: round(meanElevationM),
       highestElevationM: round(highestElevationM),
+      acuteAltitudeAvailability: round(altitudeAvailability, 4),
+      altitudePerformanceLossPct: round(altitudePerformanceLossPct, 1),
+      distanceAbove2500Pct: round(distanceAbove2500 * 100, 1),
+      distanceAbove3000Pct: round(distanceAbove3000 * 100, 1),
+      distanceAbove4000Pct: round(distanceAbove4000 * 100, 1),
+      altitudeSeverity: round(altitudeSeverity, 3),
+      packRatio: round(packRatio, 3),
       elevationCoverage: round(elevationCoverage, 3),
       grossOxygenMlKgMin: round(metabolic.grossOxygenMlKgMin, 1),
       activeCaloriesCenter: calorieCenter,

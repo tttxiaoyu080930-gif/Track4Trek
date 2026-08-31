@@ -9,11 +9,22 @@ import type {
 } from "../_lib/weather";
 import { localizeWeatherError } from "../_lib/weather";
 import type { RoutePreview } from "../_lib/route-data";
+import type { RouteDemandAnalysis } from "../_lib/route-demand";
+import { calculateMonthlySurfaceCondition } from "../_lib/surface";
+import {
+  calculateComprehensiveRouteDifficulty,
+  type ComprehensiveRouteDifficulty,
+} from "../_lib/route-difficulty";
 import { useLanguage, type Track4TrekLanguage } from "./language-system";
 import { THEME_CHANGE_EVENT } from "./theme-system";
 import { useRouteWeather } from "./use-route-weather";
+import { useRouteSurface } from "./use-route-surface";
+import { ChartXPan, ChartXZoom } from "./chart-x-zoom";
 
-type WeatherDifficultyChartProps = { preview: RoutePreview | null };
+type WeatherDifficultyChartProps = {
+  preview: RoutePreview | null;
+  analysis: RouteDemandAnalysis | null;
+};
 type WeatherLayer = keyof Pick<WeatherIndices, "difficulty" | "heat" | "snow" | "storm" | "precipitation" | "visibility">;
 
 type MonthLabel = {
@@ -112,8 +123,14 @@ function demoMonthly(): WeatherMonthlySummary[] {
 
 const DEMO_MONTHLY = demoMonthly();
 
-function layerValue(month: WeatherMonthlySummary, layer: WeatherLayer) {
-  return month.indices[layer];
+function layerValue(
+  month: WeatherMonthlySummary,
+  layer: WeatherLayer,
+  comprehensive?: ComprehensiveRouteDifficulty,
+) {
+  return layer === "difficulty" && comprehensive
+    ? comprehensive.score
+    : month.indices[layer];
 }
 
 function dateLabel(value: string, language: Track4TrekLanguage) {
@@ -204,21 +221,68 @@ function statusLabel(weather: ReturnType<typeof useRouteWeather>, text: (english
   return text("Select a route", "请选择路线");
 }
 
-export function WeatherDifficultyChart({ preview }: WeatherDifficultyChartProps) {
+export function WeatherDifficultyChart({ preview, analysis }: WeatherDifficultyChartProps) {
   const { language, text } = useLanguage();
   const weather = useRouteWeather(preview);
+  const surface = useRouteSurface(preview);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [selectedIndex, setSelectedIndex] = useState(8);
   const [isDragging, setIsDragging] = useState(false);
   const [activeLayer, setActiveLayer] = useState<WeatherLayer>("difficulty");
+  const [xZoom, setXZoom] = useState(1);
+  const [xPan, setXPan] = useState(0.5);
   const monthly = useMemo(() => {
     const rows = weather.data?.monthly ?? [];
     return rows.length === 12 ? rows : DEMO_MONTHLY;
   }, [weather.data?.monthly]);
+  const monthlySurface = useMemo(
+    () => monthly.map((entry) =>
+      calculateMonthlySurfaceCondition(surface.data, entry)),
+    [monthly, surface.data],
+  );
+  const comprehensiveMonthly = useMemo(
+    () => monthly.map((entry, index) =>
+      calculateComprehensiveRouteDifficulty(
+        analysis,
+        entry.indices,
+        monthlySurface[index] ?? null,
+      )),
+    [analysis, monthly, monthlySurface],
+  );
   const selected = monthly[selectedIndex] ?? monthly[0];
-  const selectedScore = layerValue(selected, activeLayer);
-  const selectedBand = difficultyBand(selected.indices.difficulty, language);
+  const selectedDifficulty = comprehensiveMonthly[selectedIndex] ??
+    calculateComprehensiveRouteDifficulty(
+      analysis,
+      selected.indices,
+      monthlySurface[selectedIndex] ?? null,
+    );
+  const selectedScore = layerValue(selected, activeLayer, selectedDifficulty);
+  const selectedBand = difficultyBand(selectedDifficulty.score, language);
   const activeLayerMeta = LAYERS.find((layer) => layer.id === activeLayer) ?? LAYERS[0];
+  const visibleMonthSpan = 11 / xZoom;
+  const availableMonthPan = 11 - visibleMonthSpan;
+  const visibleStartIndex = availableMonthPan * xPan;
+  const visibleEndIndex = visibleStartIndex + visibleMonthSpan;
+  const visibleMonthIndices = useMemo(
+    () => MONTHS
+      .map((_, index) => index)
+      .filter((index) =>
+        index >= Math.ceil(visibleStartIndex) && index <= Math.floor(visibleEndIndex)),
+    [visibleEndIndex, visibleStartIndex],
+  );
+  const chartMonthIndices = useMemo(
+    () => MONTHS
+      .map((_, index) => index)
+      .filter((index) =>
+        index >= Math.floor(visibleStartIndex) && index <= Math.ceil(visibleEndIndex)),
+    [visibleEndIndex, visibleStartIndex],
+  );
+  const firstVisibleMonth = visibleMonthIndices[0] ?? 0;
+  const lastVisibleMonth = visibleMonthIndices.at(-1) ?? 11;
+  const visibleMonthRange = text(
+    `${monthName(firstVisibleMonth + 1, language)}–${monthName(lastVisibleMonth + 1, language)} visible`,
+    `显示${monthName(firstVisibleMonth + 1, language)}至${monthName(lastVisibleMonth + 1, language)}`,
+  );
   const liveDays = weather.data?.daily.slice(0, 8) ?? [];
   const isIllustrative = !weather.data || weather.data.source === "fallback";
   const providerCopy = weather.status === "loading"
@@ -279,13 +343,23 @@ export function WeatherDifficultyChart({ preview }: WeatherDifficultyChartProps)
   ];
 
   const weatherIndexes = [
-    { label: text("Difficulty", "综合难度"), value: selected.indices.difficulty, color: "#73c8ec", primary: `${Math.round(selected.indices.difficulty)}/100 · ${selectedBand}`, secondary: text("route + weather stress", "路线与天气压力") },
+    { label: text("Overall route difficulty", "路线综合难度"), value: selectedDifficulty.score, color: "#73c8ec", primary: `${selectedDifficulty.score}/100 · ${selectedBand}`, secondary: selectedDifficulty.status === "estimated" ? text("terrain · endurance · altitude · load · weather", "地形 · 耐力 · 海拔 · 负重 · 天气") : text("weather illustration until a route is analysed", "分析路线前仅显示天气示例") },
     { label: text("Heat", "高温"), value: selected.indices.heat, color: "#ff896f", primary: `${number(selected.maximumTemperatureC, language)}° / ${number(selected.minimumTemperatureC, language)}°C`, secondary: `${number(selected.humidityPct, language)}% · ${text("day high / night low", "白天最高 / 夜间最低")}` },
     { label: text("Snow / ice proxy", "降雪 / 结冰代理"), value: selected.indices.snow, color: "#b4ddff", primary: selected.snowfallCm == null ? text("Snowfall not supplied", "未提供降雪量") : `${number(selected.snowfallCm, language, 1)} ${unitLabel("cm snowfall", "厘米降雪", text)}`, secondary: selected.snowDaysPct == null ? text("monthly proxy only · likelihood not supplied", "仅为月度代理 · 未提供概率") : `${number(selected.snowDaysPct, language)}% ${text("snow days", "降雪日")}` },
     { label: text("Storm proxy", "风暴代理"), value: selected.indices.storm, color: "#c99aff", primary: selected.windGustKmh == null ? text("Gust not supplied", "未提供阵风") : `${number(selected.windGustKmh, language)} ${unitLabel("km/h gust", "公里/时阵风", text)}`, secondary: text("wind + severe-weather proxy · no probability", "风速与恶劣天气代理 · 无概率") },
     { label: text("Rain", "降雨"), value: selected.indices.precipitation, color: "#56c9e7", primary: selected.precipitationMmPerDay == null ? text("Precipitation not supplied", "未提供降水量") : `${number(selected.precipitationMmPerDay, language, 1)} ${unitLabel("mm/day", "毫米/日", text)}`, secondary: selected.precipitationDaysPct == null ? text("wet-day frequency not supplied", "未提供降雨日频率") : `${number(selected.precipitationDaysPct, language)}% ${text("wet days", "降雨日")}` },
     { label: text("Visibility proxy", "能见度代理"), value: selected.indices.visibility, color: "#69d89b", primary: `${Math.round(selected.indices.visibility)}/100 ${text("clarity proxy", "清晰度代理")}`, secondary: text("physical distance available in live forecast only", "实际距离仅在实时预报中提供") },
   ];
+
+  const difficultyFactors = [
+    [text("Endurance", "耐力"), selectedDifficulty.components.endurance],
+    [text("Terrain", "地形"), selectedDifficulty.components.terrain],
+    [text("Aerobic", "有氧"), selectedDifficulty.components.aerobic],
+    [text("Altitude", "海拔"), selectedDifficulty.components.altitude],
+    [text("Pack", "负重"), selectedDifficulty.components.carriedLoad],
+    [text("Surface", "路面"), selectedDifficulty.components.surface],
+    [text("Weather", "天气"), selectedDifficulty.components.weather],
+  ] as const;
 
   const drawChart = useCallback(() => {
     const canvas = canvasRef.current;
@@ -304,9 +378,10 @@ export function WeatherDifficultyChart({ preview }: WeatherDifficultyChartProps)
     const bottom = bounds.height - 18;
     const plotWidth = right - left;
     const plotHeight = bottom - top;
-    const points = monthly.map((entry, index) => ({
-      x: left + (index / 11) * plotWidth,
-      y: top + ((100 - layerValue(entry, activeLayer)) / 100) * plotHeight,
+    const points = chartMonthIndices.map((index) => ({
+      index,
+      x: left + ((index - visibleStartIndex) / Math.max(visibleEndIndex - visibleStartIndex, 0.001)) * plotWidth,
+      y: top + ((100 - layerValue(monthly[index], activeLayer, comprehensiveMonthly[index])) / 100) * plotHeight,
     }));
     context.setTransform(density, 0, 0, density, 0, 0);
     context.clearRect(0, 0, bounds.width, bounds.height);
@@ -326,12 +401,12 @@ export function WeatherDifficultyChart({ preview }: WeatherDifficultyChartProps)
     trace(); context.lineTo(points.at(-1)!.x, bottom); context.lineTo(points[0].x, bottom); context.closePath();
     const fill = context.createLinearGradient(0, top, 0, bottom); fill.addColorStop(0, `${activeLayerMeta.color}55`); fill.addColorStop(1, `${activeLayerMeta.color}05`); context.fillStyle = fill; context.fill();
     trace(); context.strokeStyle = activeLayerMeta.color; context.lineWidth = 3; context.lineCap = "round"; context.lineJoin = "round"; context.stroke();
-    points.forEach((point, index) => { if (index === selectedIndex) return; context.beginPath(); context.arc(point.x, point.y, 2.5, 0, Math.PI * 2); context.fillStyle = activeLayerMeta.color; context.fill(); });
-    const activePoint = points[selectedIndex];
+    points.forEach((point) => { if (point.index === selectedIndex) return; context.beginPath(); context.arc(point.x, point.y, 2.5, 0, Math.PI * 2); context.fillStyle = activeLayerMeta.color; context.fill(); });
+    const activePoint = points.find((point) => point.index === selectedIndex) ?? points[0];
     context.beginPath(); context.moveTo(activePoint.x, top); context.lineTo(activePoint.x, bottom); context.strokeStyle = isLight ? "rgba(18,45,64,.46)" : "rgba(235,246,255,.5)"; context.lineWidth = 1; context.setLineDash([5, 7]); context.stroke(); context.setLineDash([]);
     context.beginPath(); context.arc(activePoint.x, activePoint.y, 13, 0, Math.PI * 2); context.fillStyle = isLight ? "rgba(247,251,252,.88)" : "rgba(3,12,22,.78)"; context.fill(); context.strokeStyle = isLight ? "rgba(17,43,60,.68)" : "rgba(244,250,255,.7)"; context.lineWidth = 2; context.stroke();
     context.beginPath(); context.arc(activePoint.x, activePoint.y, 5, 0, Math.PI * 2); context.fillStyle = activeLayerMeta.color; context.fill();
-  }, [activeLayer, activeLayerMeta.color, monthly, selectedIndex]);
+  }, [activeLayer, activeLayerMeta.color, chartMonthIndices, comprehensiveMonthly, monthly, selectedIndex, visibleEndIndex, visibleStartIndex]);
 
   useEffect(() => {
     drawChart();
@@ -352,11 +427,16 @@ export function WeatherDifficultyChart({ preview }: WeatherDifficultyChartProps)
     if (!canvas) return selectedIndex;
     const bounds = canvas.getBoundingClientRect();
     const position = clamp(clientX - bounds.left - 18, 0, Math.max(bounds.width - 36, 1));
-    return Math.round((position / Math.max(bounds.width - 36, 1)) * 11);
+    return Math.round(
+      visibleStartIndex +
+      (position / Math.max(bounds.width - 36, 1)) * (visibleEndIndex - visibleStartIndex),
+    );
   };
   const selectFromPointer = (clientX: number) => { const index = indexFromPointer(clientX); setSelectedIndex(index); return index; };
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => { event.currentTarget.setPointerCapture(event.pointerId); setIsDragging(true); selectFromPointer(event.clientX); };
-  const handlePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) selectFromPointer(event.clientX); };
+  const handlePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    selectFromPointer(event.clientX);
+  };
   const handlePointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => { selectFromPointer(event.clientX); setIsDragging(false); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); };
   const handleKeyDown = (event: KeyboardEvent<HTMLCanvasElement>) => {
     let next = selectedIndex;
@@ -367,7 +447,36 @@ export function WeatherDifficultyChart({ preview }: WeatherDifficultyChartProps)
     else if (event.key === "Home") next = 0;
     else if (event.key === "End") next = 11;
     else return;
-    event.preventDefault(); setSelectedIndex(clamp(next, 0, 11));
+    event.preventDefault();
+    const nextIndex = clamp(next, 0, 11);
+    setSelectedIndex(nextIndex);
+    if (xZoom > 1) {
+      const nextStart = clamp(
+        nextIndex - visibleMonthSpan / 2,
+        0,
+        availableMonthPan,
+      );
+      setXPan(availableMonthPan > 0 ? nextStart / availableMonthPan : 0.5);
+    }
+  };
+
+  const updateZoom = (value: number) => {
+    const nextSpan = 11 / value;
+    const nextAvailablePan = 11 - nextSpan;
+    const nextStart = clamp(
+      selectedIndex - nextSpan / 2,
+      0,
+      nextAvailablePan,
+    );
+    setXZoom(value);
+    setXPan(nextAvailablePan > 0 ? nextStart / nextAvailablePan : 0.5);
+  };
+
+  const updatePan = (value: number) => {
+    const nextPan = clamp(value, 0, 1);
+    const nextStart = availableMonthPan * nextPan;
+    setXPan(nextPan);
+    setSelectedIndex(clamp(Math.round(nextStart + visibleMonthSpan / 2), 0, 11));
   };
 
   return (
@@ -392,8 +501,54 @@ export function WeatherDifficultyChart({ preview }: WeatherDifficultyChartProps)
         </div>
         <div className="weather-chart-readout"><div className="weather-start-month"><span>{text("Starting month", "出发月份")}</span><strong>{monthName(selected.month, language)}</strong></div><div className="weather-score"><strong>{Math.round(selectedScore)}</strong><span>/100 · {activeLayer === "difficulty" ? selectedBand : text(activeLayerMeta.label, activeLayerMeta.labelZh)}</span></div></div>
         <div className="weather-layer-switch" role="group" aria-label={text("Annual weather layer", "年度天气图层")}>{LAYERS.map((layer) => <button key={layer.id} type="button" aria-pressed={activeLayer === layer.id} onClick={() => setActiveLayer(layer.id)}>{text(layer.label, layer.labelZh)}</button>)}</div>
-        <div className="weather-plot-grid"><div className="weather-y-axis" aria-hidden="true"><span>100</span><span>75</span><span>50</span><span>25</span><span>0</span></div><div className="weather-canvas-column"><canvas ref={canvasRef} className={isDragging ? "is-dragging" : undefined} role="slider" tabIndex={0} aria-label={text("Starting month", "出发月份")} aria-valuemin={0} aria-valuemax={11} aria-valuenow={selectedIndex} aria-valuetext={text(`${monthName(selected.month, language)}, ${activeLayerMeta.label} ${Math.round(selectedScore)} of 100`, `${monthName(selected.month, language)}，${activeLayerMeta.labelZh}${Math.round(selectedScore)}/100`)} aria-describedby="weather-chart-help weather-chart-summary" onKeyDown={handleKeyDown} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={() => setIsDragging(false)}>{text("Select a starting month to view route weather stress.", "选择出发月份，查看路线天气压力。")}</canvas><div className="weather-month-axis" aria-hidden="true">{MONTHS.map((item) => <span key={item.name}>{language === "zh" ? item.shortZh : item.short}</span>)}</div></div></div>
-        <div className="weather-index-dashboard" role="group" aria-label={text(`Weather indexes for ${monthName(selected.month, language)}`, `${monthName(selected.month, language)}的天气指标`)}>{weatherIndexes.map((item) => <IndexWheel key={item.label} {...item} ariaDetail={`${item.primary}. ${item.secondary}`} />)}</div>
+        <ChartXZoom
+          id="weather-x-zoom"
+          label={text("Horizontal scale", "水平缩放")}
+          zoom={xZoom}
+          maximum={4}
+          visibleRange={visibleMonthRange}
+          onChange={updateZoom}
+        />
+        <div className="weather-plot-grid"><div className="weather-y-axis" aria-hidden="true"><span>100</span><span>75</span><span>50</span><span>25</span><span>0</span></div><div className="weather-canvas-column"><canvas ref={canvasRef} className={isDragging ? "is-dragging" : undefined} role="slider" tabIndex={0} aria-label={text("Starting month", "出发月份")} aria-valuemin={0} aria-valuemax={11} aria-valuenow={selectedIndex} aria-valuetext={text(`${monthName(selected.month, language)}, ${activeLayerMeta.label} ${Math.round(selectedScore)} of 100`, `${monthName(selected.month, language)}，${activeLayerMeta.labelZh}${Math.round(selectedScore)}/100`)} aria-describedby="weather-chart-help weather-chart-summary" onKeyDown={handleKeyDown} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={() => setIsDragging(false)}>{text("Select a starting month to view route difficulty and weather layers.", "选择出发月份，查看路线综合难度与天气图层。")}</canvas><div className="weather-month-axis" style={{ gridTemplateColumns: `repeat(${visibleMonthIndices.length}, minmax(0, 1fr))` }} aria-hidden="true">{visibleMonthIndices.map((index) => { const item = MONTHS[index]; return <span key={item.name}>{language === "zh" ? item.shortZh : item.short}</span>; })}</div></div></div>
+        <ChartXPan
+          id="weather-x-pan"
+          label={text("Move visible months", "左右移动显示月份")}
+          position={xPan}
+          disabled={xZoom <= 1}
+          disabledText={text("Zoom in to pan", "放大后可左右移动")}
+          visibleRange={visibleMonthRange}
+          onChange={updatePan}
+        />
+        <div className="weather-index-dashboard" role="group" aria-label={text(`Route and weather indexes for ${monthName(selected.month, language)}`, `${monthName(selected.month, language)}的路线与天气指标`)}>{weatherIndexes.map((item) => <IndexWheel key={item.label} {...item} ariaDetail={`${item.primary}. ${item.secondary}`} />)}</div>
+        <section className="route-difficulty-audit" aria-labelledby="route-difficulty-audit-title">
+          <div className="route-difficulty-audit-heading">
+            <div>
+              <span>{text("Comprehensive planning index", "综合规划指数")}</span>
+              <strong id="route-difficulty-audit-title">
+                {text("What drives this score", "难度由什么构成")}
+              </strong>
+            </div>
+            <span>{text(
+              `Intrinsic ${selectedDifficulty.baseScore - selectedDifficulty.surfaceAdjustment} + surface ${selectedDifficulty.surfaceAdjustment} + weather ${selectedDifficulty.weatherAdjustment}`,
+              `路线本身 ${selectedDifficulty.baseScore - selectedDifficulty.surfaceAdjustment} + 路面 ${selectedDifficulty.surfaceAdjustment} + 天气 ${selectedDifficulty.weatherAdjustment}`,
+            )}</span>
+          </div>
+          <div className="route-difficulty-factors">
+            {difficultyFactors.map(([label, value]) => (
+              <div key={label} style={{ "--difficulty-factor": `${value}%` } as CSSProperties}>
+                <span>{label}</span><strong>{value}</strong><i aria-hidden="true" />
+              </div>
+            ))}
+          </div>
+          <div className="route-altitude-summary">
+            <span>{text("Altitude exposure", "海拔暴露")}</span>
+            <strong>{number(selectedDifficulty.altitude.meanElevationM, language)} m {text("mean", "平均")} · {number(selectedDifficulty.altitude.highestElevationM, language)} m {text("high", "最高")}</strong>
+            <small>{text(
+              `${number(selectedDifficulty.altitude.acuteAvailabilityPct, language, 1)}% estimated acute aerobic capacity retained · ${number(selectedDifficulty.altitude.distanceAbove2500Pct, language, 1)}% of distance above 2,500 m`,
+              `估算急性有氧能力保留 ${number(selectedDifficulty.altitude.acuteAvailabilityPct, language, 1)}% · ${number(selectedDifficulty.altitude.distanceAbove2500Pct, language, 1)}% 路程位于 2,500 米以上`,
+            )}</small>
+          </div>
+        </section>
         <section className="weather-selected-details" aria-labelledby="weather-selected-details-title">
           <div className="weather-selected-details-heading">
             <div>
@@ -411,8 +566,8 @@ export function WeatherDifficultyChart({ preview }: WeatherDifficultyChartProps)
             ))}
           </dl>
         </section>
-        <div className="weather-live-strip" role="region" aria-label={text("Live route forecast", "路线实时预报")}><div className="weather-live-strip-heading"><div><span>{text("Next 16 days", "未来 16 天")}</span><strong>{text("Live route forecast", "路线实时预报")}</strong></div><span>{liveDays.length ? `${liveDays.length} / 16 · ${forecastSourceLabel(weather.data, text)}` : text("Unavailable", "暂不可用")}</span></div>{liveDays.length ? <div className="weather-live-days">{liveDays.map((day) => <article key={day.date}><span>{dateLabel(day.date, language)}</span><strong>{Math.round(day.indices.difficulty)}</strong><small>{number(day.minimumTemperatureC, language)}° / {number(day.maximumTemperatureC, language)}°C · {weatherCodeLabel(day.weatherCode, text)} · {number(day.precipitationProbabilityMaxPct, language, 0)}%</small><i style={{ "--weather-day-score": `${day.indices.difficulty}%` } as CSSProperties} aria-hidden="true" /></article>)}</div> : <p>{weather.status === "loading" ? text("Fetching route conditions…", "正在获取路线天气…") : text("The seasonal dashboard remains available while a date forecast is unavailable.", "日期预报不可用时，季节仪表盘仍可使用。")}</p>}</div>
-        <p className="weather-chart-disclaimer" id="weather-chart-summary">{text("Monthly values are climate context, not a long-range forecast. NASA POWER's seasonal baseline represents the route centre; storm and atmospheric visibility are transparent proxies. Representative route coordinates are sent to weather providers; the GPX file is not uploaded. Provider coverage is shown above.", "月度数值是气候背景，不是长期预报。NASA POWER 季节基线代表路线中心；风暴和大气能见度是透明代理指标。代表性路线坐标会发送给天气服务商；GPX 文件不会被上传。上方会显示服务商覆盖情况。")}</p>
+        <div className="weather-live-strip" role="region" aria-label={text("Live route forecast", "路线实时预报")}><div className="weather-live-strip-heading"><div><span>{text("Next 16 days", "未来 16 天")}</span><strong>{text("Live route forecast", "路线实时预报")}</strong></div><span>{liveDays.length ? `${liveDays.length} / 16 · ${forecastSourceLabel(weather.data, text)}` : text("Unavailable", "暂不可用")}</span></div>{liveDays.length ? <div className="weather-live-days">{liveDays.map((day) => { const monthIndex = clamp(Number(day.date.slice(5, 7)) - 1, 0, 11); const dayDifficulty = calculateComprehensiveRouteDifficulty(analysis, day.indices, monthlySurface[monthIndex] ?? null); return <article key={day.date}><span>{dateLabel(day.date, language)}</span><strong>{dayDifficulty.score}</strong><small>{number(day.minimumTemperatureC, language)}° / {number(day.maximumTemperatureC, language)}°C · {weatherCodeLabel(day.weatherCode, text)} · {number(day.precipitationProbabilityMaxPct, language, 0)}%</small><i style={{ "--weather-day-score": `${dayDifficulty.score}%` } as CSSProperties} aria-hidden="true" /></article>; })}</div> : <p>{weather.status === "loading" ? text("Fetching route conditions…", "正在获取路线天气…") : text("The seasonal dashboard remains available while a date forecast is unavailable.", "日期预报不可用时，季节仪表盘仍可使用。")}</p>}</div>
+        <p className="weather-chart-disclaimer" id="weather-chart-summary">{text("The comprehensive score combines GPX terrain, planned duration, aerobic demand, carried load, acute altitude exposure, mapped trail surface and weather. OpenStreetMap surface tags are sampled along the route; month-dependent mud and snow/ice are weather-derived planning proxies, not direct observations. Storm and atmospheric visibility remain weather-planning proxies. It is not a validated safety scale, medical assessment or altitude-illness prediction. Representative coordinates are sent to weather and surface providers, but the GPX file is not uploaded.", "综合分数结合 GPX 地形、计划时长、有氧需求、负重、急性海拔暴露、地图路面信息与天气。系统沿路线采样 OpenStreetMap 路面标签；逐月泥泞与冰雪比例是基于天气的规划代理，并非直接观测。风暴与大气能见度仍属于天气规划代理。该分数不是经过验证的安全量表、医疗评估或高原病预测。代表性坐标会发送给天气与路面服务商，但 GPX 文件不会被上传。")}</p>
       </div>
     </section>
   );

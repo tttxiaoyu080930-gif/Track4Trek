@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import {
   readRoutePreview,
   type PreviewElevationPoint,
@@ -8,6 +9,7 @@ import {
 } from "../_lib/route-data";
 import { useLanguage } from "./language-system";
 import { THEME_CHANGE_EVENT } from "./theme-system";
+import { ChartXPan, ChartXZoom } from "./chart-x-zoom";
 
 type ElevationChartMode = "elevation" | "grade";
 
@@ -140,16 +142,19 @@ function prepareProfilePoints(points: PreviewElevationPoint[]): PreparedProfileP
 
 function resampleProfile(
   points: PreparedProfilePoint[],
-  totalDistanceKm: number,
+  startDistanceKm: number,
+  endDistanceKm: number,
   targetCount: number,
 ): PreparedProfilePoint[] {
   if (points.length < 2) return points;
 
   const samples: PreparedProfilePoint[] = [];
   let segmentIndex = 0;
+  const visibleDistanceKm = Math.max(endDistanceKm - startDistanceKm, 0.000001);
 
   for (let index = 0; index < targetCount; index += 1) {
-    const distanceKm = (totalDistanceKm * index) / Math.max(targetCount - 1, 1);
+    const distanceKm = startDistanceKm +
+      (visibleDistanceKm * index) / Math.max(targetCount - 1, 1);
     while (
       segmentIndex < points.length - 2 &&
       points[segmentIndex + 1].distanceKm < distanceKm
@@ -263,6 +268,9 @@ function drawElevationProfile(
   profile: ElevationProfileData,
   mode: ElevationChartMode,
   labels: ChartLabels,
+  zoom: number,
+  pan: number,
+  activePoint: PreparedProfilePoint | null,
 ) {
   const bounds = canvas.getBoundingClientRect();
   if (!bounds.width || !bounds.height) return;
@@ -288,19 +296,31 @@ function drawElevationProfile(
   );
   const preparedPoints = prepareProfilePoints(profile.points);
   if (preparedPoints.length < 2) return;
+  const visibleDistance = totalDistance / Math.max(zoom, 1);
+  const visibleStart =
+    (totalDistance - visibleDistance) * Math.min(Math.max(pan, 0), 1);
+  const visibleEnd = visibleStart + visibleDistance;
   const targetCount = Math.max(72, Math.min(220, Math.round(plotWidth / 4)));
-  const samples = resampleProfile(preparedPoints, totalDistance, targetCount);
+  const samples = resampleProfile(
+    preparedPoints,
+    visibleStart,
+    visibleEnd,
+    targetCount,
+  );
   const textColor = isLight ? "rgba(24, 51, 66, 0.6)" : "rgba(224, 239, 248, 0.62)";
   const gridColor = isLight ? "rgba(25, 57, 72, 0.13)" : "rgba(218, 237, 246, 0.12)";
   const xForDistance = (distanceKm: number) =>
-    left + (Math.max(0, Math.min(distanceKm, totalDistance)) / totalDistance) * plotWidth;
+    left +
+      ((Math.max(visibleStart, Math.min(distanceKm, visibleEnd)) - visibleStart) /
+        Math.max(visibleEnd - visibleStart, 0.000001)) *
+        plotWidth;
 
   context.setTransform(density, 0, 0, density, 0, 0);
   context.clearRect(0, 0, bounds.width, bounds.height);
   context.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
   context.textBaseline = "middle";
 
-  const gradeValues = preparedPoints
+  const gradeValues = samples
     .map((point) => point.gradePercent)
     .filter((value): value is number => value != null && Number.isFinite(value));
   const gradeMaximum = gradeValues.length ? Math.max(...gradeValues) : 0;
@@ -309,9 +329,12 @@ function drawElevationProfile(
     5,
     Math.ceil(Math.max(Math.abs(gradeMaximum), Math.abs(gradeMinimum)) / 5) * 5,
   );
-  const elevationSpan = Math.max(profile.highestM - profile.lowestM, 1);
-  const elevationMinimum = profile.lowestM - elevationSpan * 0.12;
-  const elevationMaximum = profile.highestM + elevationSpan * 0.12;
+  const visibleElevations = samples.map((point) => point.elevationM);
+  const visibleLowestM = Math.min(...visibleElevations);
+  const visibleHighestM = Math.max(...visibleElevations);
+  const elevationSpan = Math.max(visibleHighestM - visibleLowestM, 1);
+  const elevationMinimum = visibleLowestM - elevationSpan * 0.12;
+  const elevationMaximum = visibleHighestM + elevationSpan * 0.12;
   const elevationScaleSpan = elevationMaximum - elevationMinimum;
 
   for (let step = 0; step <= 4; step += 1) {
@@ -342,17 +365,19 @@ function drawElevationProfile(
     const x = left + ratio * plotWidth;
     context.fillStyle = textColor;
     context.textAlign = step === 0 ? "left" : step === horizontalSteps ? "right" : "center";
-    context.fillText(`${(totalDistance * ratio).toFixed(step === 0 ? 0 : 1)} km`, x, bottom + 25);
+    const distance = visibleStart + (visibleEnd - visibleStart) * ratio;
+    context.fillText(`${distance.toFixed(step === 0 ? 0 : 1)} km`, x, bottom + 25);
   }
 
   const spacing = plotWidth / Math.max(samples.length - 1, 1);
   const barWidth = Math.max(0.75, Math.min(1.35, spacing * 0.32));
+  const zeroY = top + plotHeight / 2;
 
   if (mode === "elevation") {
     samples.forEach((point) => {
       const normalizedElevation = Math.max(
         0,
-        Math.min(1, (point.elevationM - profile.lowestM) / elevationSpan),
+        Math.min(1, (point.elevationM - visibleLowestM) / elevationSpan),
       );
       const y = top + ((elevationMaximum - point.elevationM) / elevationScaleSpan) * plotHeight;
       const x = xForDistance(point.distanceKm);
@@ -362,10 +387,10 @@ function drawElevationProfile(
       context.fillRect(Math.round((x - barWidth / 2) * density) / density, y, barWidth, bottom - y);
     });
 
-    const highest = preparedPoints.reduce((selected, point) =>
+    const highest = samples.reduce((selected, point) =>
       point.elevationM > selected.elevationM ? point : selected,
     );
-    const lowest = preparedPoints.reduce((selected, point) =>
+    const lowest = samples.reduce((selected, point) =>
       point.elevationM < selected.elevationM ? point : selected,
     );
     const yForElevation = (elevationM: number) =>
@@ -394,7 +419,6 @@ function drawElevationProfile(
       isLight,
     });
   } else {
-    const zeroY = top + plotHeight / 2;
     samples.forEach((point) => {
       if (point.gradePercent == null) return;
       const y = zeroY - (point.gradePercent / gradeDomain) * (plotHeight / 2);
@@ -411,10 +435,10 @@ function drawElevationProfile(
       );
     });
 
-    const ascentPoints = preparedPoints.filter(
+    const ascentPoints = samples.filter(
       (point) => point.gradePercent != null && point.gradePercent > 0,
     );
-    const descentPoints = preparedPoints.filter(
+    const descentPoints = samples.filter(
       (point) => point.gradePercent != null && point.gradePercent < 0,
     );
     const steepestAscent = ascentPoints.length
@@ -457,6 +481,31 @@ function drawElevationProfile(
       });
     }
   }
+
+  if (
+    activePoint &&
+    activePoint.distanceKm >= visibleStart &&
+    activePoint.distanceKm <= visibleEnd
+  ) {
+    const x = xForDistance(activePoint.distanceKm);
+    const y = mode === "elevation"
+      ? top + ((elevationMaximum - activePoint.elevationM) / elevationScaleSpan) * plotHeight
+      : activePoint.gradePercent == null
+        ? zeroY
+        : zeroY - (activePoint.gradePercent / gradeDomain) * (plotHeight / 2);
+    context.beginPath();
+    context.moveTo(x, top);
+    context.lineTo(x, bottom);
+    context.strokeStyle = isLight ? "rgba(17, 43, 60, .5)" : "rgba(238, 247, 252, .62)";
+    context.lineWidth = 1;
+    context.setLineDash([4, 5]);
+    context.stroke();
+    context.setLineDash([]);
+    context.beginPath();
+    context.arc(x, y, 5, 0, Math.PI * 2);
+    context.fillStyle = mode === "elevation" ? "#ffad68" : "#72c9dc";
+    context.fill();
+  }
 }
 
 export function ElevationProfile() {
@@ -464,6 +513,9 @@ export function ElevationProfile() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [profile, setProfile] = useState(FALLBACK_PROFILE);
   const [chartMode, setChartMode] = useState<ElevationChartMode>("elevation");
+  const [xZoom, setXZoom] = useState(1);
+  const [xPan, setXPan] = useState(0.5);
+  const [activePointIndex, setActivePointIndex] = useState<number | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setProfile(profileFromPreview(readRoutePreview())), 0);
@@ -478,6 +530,27 @@ export function ElevationProfile() {
   const descentGrades = gradeValues.filter((value) => value < 0);
   const steepestAscent = ascentGrades.length ? Math.max(...ascentGrades) : null;
   const steepestDescent = descentGrades.length ? Math.min(...descentGrades) : null;
+  const totalDistance = Math.max(
+    profile.distanceKm,
+    preparedPoints.at(-1)?.distanceKm ?? 0,
+    0.001,
+  );
+  const visibleDistance = totalDistance / xZoom;
+  const visibleStart = (totalDistance - visibleDistance) * xPan;
+  const visibleEnd = visibleStart + visibleDistance;
+  const interactionPoints = useMemo(
+    () => preparedPoints.length < 2
+      ? preparedPoints
+      : resampleProfile(preparedPoints, visibleStart, visibleEnd, 160),
+    [preparedPoints, visibleEnd, visibleStart],
+  );
+  const activePoint = activePointIndex == null
+    ? null
+    : interactionPoints[activePointIndex] ?? null;
+  const visibleRangeLabel = text(
+    `${visibleStart.toFixed(1)}–${visibleEnd.toFixed(1)} km visible`,
+    `显示 ${visibleStart.toFixed(1)}–${visibleEnd.toFixed(1)} 公里`,
+  );
 
   const drawChart = useCallback(() => {
     if (!canvasRef.current) return;
@@ -499,8 +572,39 @@ export function ElevationProfile() {
         language === "zh"
           ? `最大下坡 −${Math.abs(gradePercent).toFixed(1)}% · ${distanceKm.toFixed(1)} 公里`
           : `DOWN −${Math.abs(gradePercent).toFixed(1)}% · ${distanceKm.toFixed(1)} km`,
+    }, xZoom, xPan, activePoint);
+  }, [activePoint, chartMode, language, profile, xPan, xZoom]);
+
+  const selectPointFromClientX = (clientX: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas || interactionPoints.length === 0) return;
+    const bounds = canvas.getBoundingClientRect();
+    const left = bounds.width < 620 ? 48 : 66;
+    const right = bounds.width - (bounds.width < 620 ? 14 : 24);
+    const ratio = Math.min(
+      Math.max((clientX - bounds.left - left) / Math.max(right - left, 1), 0),
+      1,
+    );
+    const targetDistance = visibleStart + ratio * (visibleEnd - visibleStart);
+    let nearestIndex = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    interactionPoints.forEach((point, index) => {
+      const distance = Math.abs(point.distanceKm - targetDistance);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
     });
-  }, [chartMode, language, profile]);
+    setActivePointIndex(nearestIndex);
+  };
+
+  const moveActivePoint = (direction: -1 | 1) => {
+    if (!interactionPoints.length) return;
+    const position = activePointIndex ?? Math.floor(interactionPoints.length / 2);
+    setActivePointIndex(
+      Math.min(Math.max(position + direction, 0), interactionPoints.length - 1),
+    );
+  };
 
   useEffect(() => {
     drawChart();
@@ -554,6 +658,18 @@ export function ElevationProfile() {
             : text("Showing grade percentage bars.", "正在显示坡度百分比柱状图。")}
         </p>
 
+        <ChartXZoom
+          id="overview-elevation-x-zoom"
+          label={text("Horizontal scale", "水平缩放")}
+          zoom={xZoom}
+          visibleRange={visibleRangeLabel}
+          onChange={(value) => {
+            setXZoom(value);
+            setXPan(0.5);
+            setActivePointIndex(null);
+          }}
+        />
+
         <dl className="elevation-profile-readout">
           <div>
             <dt>{text("Distance", "距离")}</dt>
@@ -584,24 +700,71 @@ export function ElevationProfile() {
           )}
         </dl>
 
-        <canvas
-          ref={canvasRef}
-          className="elevation-profile-canvas"
-          role="img"
-          aria-label={
-            chartMode === "elevation"
-              ? text(
-                  `Elevation profile over ${profile.distanceKm.toFixed(1)} kilometers. Highest point ${profile.highestM} meters; lowest point ${profile.lowestM} meters.`,
-                  `全程 ${profile.distanceKm.toFixed(1)} 公里的海拔剖面。最高点 ${profile.highestM} 米；最低点 ${profile.lowestM} 米。`,
-                )
-              : text(
-                  `Grade profile over ${profile.distanceKm.toFixed(1)} kilometers. Steepest ascent ${formatSignedGrade(steepestAscent)} percent; steepest descent ${formatSignedGrade(steepestDescent)} percent.`,
-                  `全程 ${profile.distanceKm.toFixed(1)} 公里的坡度剖面。最大上坡坡度 ${formatSignedGrade(steepestAscent)}%；最大下坡坡度 ${formatSignedGrade(steepestDescent)}%。`,
-                )
-          }
-        >
-          {text("Route elevation and grade profile", "路线海拔与坡度剖面")}
-        </canvas>
+        <div className="elevation-chart-interactive">
+          <canvas
+            ref={canvasRef}
+            className="elevation-profile-canvas"
+            role="application"
+            tabIndex={0}
+            aria-label={
+              chartMode === "elevation"
+                ? text(
+                    `Interactive elevation profile over ${profile.distanceKm.toFixed(1)} kilometers. Move the pointer or use left and right arrow keys to inspect a bar.`,
+                    `全程 ${profile.distanceKm.toFixed(1)} 公里的交互式海拔剖面。移动指针或使用左右方向键查看柱形数据。`,
+                  )
+                : text(
+                    `Interactive grade profile over ${profile.distanceKm.toFixed(1)} kilometers. Move the pointer or use left and right arrow keys to inspect a bar.`,
+                    `全程 ${profile.distanceKm.toFixed(1)} 公里的交互式坡度剖面。移动指针或使用左右方向键查看柱形数据。`,
+                  )
+            }
+            onPointerMove={(event) => selectPointFromClientX(event.clientX)}
+            onPointerLeave={() => setActivePointIndex(null)}
+            onFocus={() => {
+              if (activePointIndex == null) {
+                setActivePointIndex(Math.floor(interactionPoints.length / 2));
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              moveActivePoint(event.key === "ArrowLeft" ? -1 : 1);
+            }}
+          >
+            {text("Route elevation and grade profile", "路线海拔与坡度剖面")}
+          </canvas>
+          {activePoint ? (
+            <output
+              className="chart-point-tooltip"
+              aria-live="polite"
+              style={{
+                "--chart-tooltip-position": `${
+                  ((activePoint.distanceKm - visibleStart) /
+                    Math.max(visibleEnd - visibleStart, 0.000001)) * 100
+                }%`,
+              } as CSSProperties}
+            >
+              <span>{activePoint.distanceKm.toFixed(2)} km</span>
+              <strong>
+                {chartMode === "elevation"
+                  ? `${Math.round(activePoint.elevationM)} m`
+                  : `${formatSignedGrade(activePoint.gradePercent)}%`}
+              </strong>
+            </output>
+          ) : null}
+        </div>
+
+        <ChartXPan
+          id="overview-elevation-x-pan"
+          label={text("Move visible range", "左右移动显示范围")}
+          position={xPan}
+          disabled={xZoom <= 1}
+          disabledText={text("Zoom in to pan", "放大后可左右移动")}
+          visibleRange={visibleRangeLabel}
+          onChange={(value) => {
+            setXPan(value);
+            setActivePointIndex(null);
+          }}
+        />
 
         <p className="elevation-profile-note">
           {chartMode === "grade"

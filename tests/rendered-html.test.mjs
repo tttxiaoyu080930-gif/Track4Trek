@@ -261,6 +261,10 @@ test("server-renders the real-map result flow, metric wheels, forecasts, and not
     resultsSource,
     /<PostActivityForecast\s+status=\{analysisState\.status\}\s+analysis=\{analysisState\.analysis\}/,
   );
+  assert.match(
+    resultsSource,
+    /<WeatherDifficultyChart\s+preview=\{analysisState\.preview\}\s+analysis=\{analysisState\.analysis\}/,
+  );
   assert.match(resultsSource, /proContent=\{\s*<ProRouteWorkspace/);
   assert.match(resultsSource, /preview=\{analysisState\.preview\}/);
   assert.match(proWorkspaceSource, /className="pro-workspace"/);
@@ -282,6 +286,8 @@ test("server-renders the real-map result flow, metric wheels, forecasts, and not
   assert.match(proWorkspaceSource, /MONTHLY_STRESS/);
   assert.match(proWorkspaceSource, /className="pro-chart-frame"/);
   assert.match(proWorkspaceSource, /className="pro-segment-table"/);
+  assert.match(proWorkspaceSource, /className="pro-difficulty-audit"/);
+  assert.match(proWorkspaceSource, /calculateComprehensiveRouteDifficulty/);
 
   const technicalStart = proWorkspaceSource.indexOf(
     '<section className="pro-technical-section"',
@@ -304,9 +310,26 @@ test("server-renders the real-map result flow, metric wheels, forecasts, and not
   assert.match(html, /aria-label="Graph view"/i);
   assert.match(html, /aria-pressed="true"[^>]*>\s*Elevation/i);
   assert.match(html, /Grade \(%\)/i);
-  assert.match(html, /Highest point 934 meters; lowest point 340 meters/i);
+  assert.match(html, /Interactive elevation profile over 18\.4 kilometers/i);
+  assert.match(html, /Horizontal scale/i);
+  assert.match(html, /id="overview-elevation-x-zoom"/i);
+  assert.match(html, /id="overview-elevation-x-pan"/i);
+  assert.match(html, /id="weather-x-zoom"/i);
+  assert.match(html, /id="weather-x-pan"/i);
+  assert.match(html, /id="surface"/i);
+  assert.match(html, /Trail surface by month/i);
+  assert.match(html, /id="surface-month"/i);
+  assert.match(html, /Mapped base composition/i);
+  assert.match(resultsSource, /<TrailSurfacePanel/);
+  assert.match(proWorkspaceSource, /id="pro-profile-x-zoom"/);
+  assert.match(proWorkspaceSource, /id="pro-profile-x-pan"/);
+  assert.match(proWorkspaceSource, /pan=\{chartXPan\}/);
+  assert.match(proWorkspaceSource, /className="pro-chart-active-point"/);
   assert.match(html, /Generic profile/i);
   assert.match(html, /Weather-adjusted difficulty/i);
+  assert.match(html, /Overall route difficulty/i);
+  assert.match(html, /What drives this score/i);
+  assert.match(html, /Acute aerobic capacity retained/i);
   assert.match(html, /Starting month/i);
   assert.match(html, /role="slider"/i);
   assert.match(html, /Illustrative baseline/i);

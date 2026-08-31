@@ -12,6 +12,7 @@ import {
   type AnalysisDisplayStatus,
 } from "../_components/route-demand-metrics";
 import { TrailMap } from "../_components/trail-map";
+import { TrailSurfacePanel } from "../_components/trail-surface-panel";
 import { WeatherDifficultyChart } from "../_components/weather-difficulty-chart";
 import {
   calculateRouteDemand,
@@ -73,7 +74,14 @@ export default function ResultsPage() {
         <TrailMap />
 
         <ElevationProfile />
-        <WeatherDifficultyChart preview={analysisState.preview} />
+        <TrailSurfacePanel
+          preview={analysisState.preview}
+          analysis={analysisState.analysis}
+        />
+        <WeatherDifficultyChart
+          preview={analysisState.preview}
+          analysis={analysisState.analysis}
+        />
         <RouteDemandMetrics
           status={analysisState.status}
           analysis={analysisState.analysis}

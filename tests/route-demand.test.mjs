@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { calculateRouteDemand } from "../app/_lib/route-demand.ts";
+import { calculateComprehensiveRouteDifficulty } from "../app/_lib/route-difficulty.ts";
 import {
   maximumMovingMinutesForPlan,
   minimumMovingMinutesForPlan,
@@ -354,7 +355,7 @@ test("age and sex select reference tables without changing active calories", () 
   assert.notEqual(male.metrics.endurance.ageBand, female.metrics.endurance.ageBand);
 });
 
-test("higher altitude raises required VO2 without changing active calories", () => {
+test("higher altitude raises aerobic, endurance, hill and recovery demand without inventing calories", () => {
   const low = calculateRouteDemand(routePreview());
   const high = calculateRouteDemand(routePreview({
     profile: [
@@ -365,7 +366,61 @@ test("higher altitude raises required VO2 without changing active calories", () 
   }));
 
   assert.ok(high.metrics.vo2Max.center > low.metrics.vo2Max.center);
+  assert.ok(high.features.enduranceSeverity > low.features.enduranceSeverity);
+  assert.ok(high.features.hillSeverity > low.features.hillSeverity);
+  assert.ok(high.metrics.recovery.center > low.metrics.recovery.center);
+  assert.ok(high.features.altitudePerformanceLossPct > low.features.altitudePerformanceLossPct);
+  assert.ok(high.features.distanceAbove2500Pct > 0);
   assert.equal(high.metrics.activeCalories.center, low.metrics.activeCalories.center);
+});
+
+test("multi-day stages retain their own altitude exposure", () => {
+  const analysis = calculateRouteDemand(routePreview({
+    survey: { tripMode: "multi-day", plannedDays: 3, movingHours: 24 },
+    profile: [
+      [0, 800],
+      [12, 1600],
+      [24, 2800],
+      [36, 4200],
+    ],
+  }));
+
+  assert.equal(analysis.endurancePlan.stages.length, 3);
+  assert.ok(analysis.endurancePlan.stages.every((stage) =>
+    Number.isFinite(stage.meanElevationM) &&
+    stage.altitudeAvailabilityPct >= 65 &&
+    stage.altitudeAvailabilityPct <= 100));
+  assert.ok(
+    analysis.endurancePlan.stages.at(-1).altitudeAvailabilityPct <
+      analysis.endurancePlan.stages[0].altitudeAvailabilityPct,
+  );
+});
+
+test("comprehensive difficulty combines intrinsic route and weather stress", () => {
+  const analysis = calculateRouteDemand(routePreview({
+    survey: { packWeightKg: 12, movingHours: 8 },
+    profile: [[0, 2200], [8, 3400], [16, 2200]],
+  }));
+  const weather = (difficulty) => ({
+    difficulty,
+    heat: difficulty,
+    snow: difficulty,
+    storm: difficulty,
+    precipitation: difficulty,
+    visibility: 100 - difficulty,
+    wind: difficulty,
+    uv: difficulty,
+    cold: difficulty,
+  });
+  const mild = calculateComprehensiveRouteDifficulty(analysis, weather(10));
+  const severe = calculateComprehensiveRouteDifficulty(analysis, weather(90));
+
+  assert.equal(mild.status, "estimated");
+  assert.ok(mild.score >= mild.baseScore);
+  assert.ok(severe.score > mild.score);
+  assert.equal(mild.components.altitude, Math.round(analysis.features.altitudeSeverity * 100));
+  assert.ok(Object.values(severe.components).every((value) => value >= 0 && value <= 100));
+  assert.ok(severe.score <= 100);
 });
 
 test("missing elevation is explicit and never reuses illustrative terrain", () => {
