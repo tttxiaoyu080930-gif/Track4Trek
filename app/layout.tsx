@@ -47,6 +47,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <PersistentSiteHeader />
           {children}
         </LanguageProvider>
+        <Script
+          id="goatcounter"
+          data-goatcounter="https://tonysiuyuk0930.goatcounter.com/count"
+          src="https://gc.zgo.at/count.js"
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   );
