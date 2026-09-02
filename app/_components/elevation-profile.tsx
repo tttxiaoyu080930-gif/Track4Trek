@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import {
-  readRoutePreview,
+  readActiveRoutePreview,
   type PreviewElevationPoint,
   type RoutePreview,
 } from "../_lib/route-data";
@@ -518,7 +518,7 @@ export function ElevationProfile() {
   const [activePointIndex, setActivePointIndex] = useState<number | null>(null);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setProfile(profileFromPreview(readRoutePreview())), 0);
+    const timer = window.setTimeout(() => setProfile(profileFromPreview(readActiveRoutePreview())), 0);
     return () => window.clearTimeout(timer);
   }, []);
 

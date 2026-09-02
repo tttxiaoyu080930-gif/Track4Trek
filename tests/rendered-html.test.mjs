@@ -207,6 +207,26 @@ test("server-renders the real-map result flow, metric wheels, forecasts, and not
     new URL("../app/results/page.tsx", import.meta.url),
     "utf8",
   );
+  const siteHeaderSource = await readFile(
+    new URL("../app/_components/site-header.tsx", import.meta.url),
+    "utf8",
+  );
+  const intakeSource = await readFile(
+    new URL("../app/_components/route-intake.tsx", import.meta.url),
+    "utf8",
+  );
+  const analyzingSource = await readFile(
+    new URL("../app/analyzing/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const trailMapSource = await readFile(
+    new URL("../app/_components/trail-map.tsx", import.meta.url),
+    "utf8",
+  );
+  const elevationSource = await readFile(
+    new URL("../app/_components/elevation-profile.tsx", import.meta.url),
+    "utf8",
+  );
   const proWorkspaceSource = await readFile(
     new URL("../app/_components/pro-route-workspace.tsx", import.meta.url),
     "utf8",
@@ -234,6 +254,15 @@ test("server-renders the real-map result flow, metric wheels, forecasts, and not
   assert.match(html, /data-lowest-altitude="340"/i);
   assert.match(html, /Highest altitude:.*934.*meters/i);
   assert.match(html, /Lowest altitude:.*340.*meters/i);
+  assert.match(html, /Compare with another route/i);
+  assert.match(siteHeaderSource, /ROUTE_COMPARISON_LEFT_STORAGE_KEY/);
+  assert.match(siteHeaderSource, /src="\/results\?compare-pane=left"/);
+  assert.match(siteHeaderSource, /src="\/\?compare-pane=right"/);
+  assert.match(siteHeaderSource, /Side-by-side route comparison/);
+  assert.match(intakeSource, /\/analyzing\?compare-pane=right/);
+  assert.match(analyzingSource, /\/results\?compare-pane=right/);
+  assert.match(trailMapSource, /readActiveRoutePreview\(\)/);
+  assert.match(elevationSource, /readActiveRoutePreview\(\)/);
   assert.match(html, /Recommended Metric Ranges × Garmin/i);
   assert.match(html, /dial-segments/i);
   assert.doesNotMatch(html, /watch-score-marker/i);
@@ -253,9 +282,12 @@ test("server-renders the real-map result flow, metric wheels, forecasts, and not
   }
   assert.match(html, /data-route-demand-state="loading"/i);
   assert.doesNotMatch(html, /low confidence|high confidence|低置信度|高置信度/i);
-  assert.match(resultsSource, /const preview = readRoutePreview\(\)/);
+  assert.match(
+    resultsSource,
+    /const preview = readActiveRoutePreview\(\)/,
+  );
   assert.equal(
-    (resultsSource.match(/readRoutePreview\(\)/g) ?? []).length,
+    (resultsSource.match(/readActiveRoutePreview\(\)/g) ?? []).length,
     1,
     "results should read the stored preview once",
   );

@@ -31,6 +31,17 @@ export function SiteScenery() {
     }
   }, [pathname]);
 
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== THEME_STORAGE_KEY) return;
+      document.documentElement.dataset.track4trekTheme =
+        event.newValue === "light" ? "light" : "dark";
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
   return (
     <div className="site-scenery" aria-hidden="true">
       <Image

@@ -18,7 +18,10 @@ import {
   calculateRouteDemand,
   type RouteDemandAnalysis,
 } from "../_lib/route-demand";
-import { readRoutePreview, type RoutePreview } from "../_lib/route-data";
+import {
+  readActiveRoutePreview,
+  type RoutePreview,
+} from "../_lib/route-data";
 
 type StoredAnalysisState = {
   status: AnalysisDisplayStatus;
@@ -36,7 +39,7 @@ export default function ResultsPage() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const preview = readRoutePreview();
+      const preview = readActiveRoutePreview();
       if (!preview) {
         setAnalysisState({ status: "missing", analysis: null, preview: null });
         return;

@@ -1,4 +1,5 @@
 export const ROUTE_PREVIEW_STORAGE_KEY = "track4trek:route-preview";
+export const ROUTE_COMPARISON_LEFT_STORAGE_KEY = "track4trek:comparison-left-route:v1";
 
 export type TripActivity = "day-hike" | "trail-run" | "backpacking";
 export type ProfileSex = "male" | "female";
@@ -474,8 +475,15 @@ export function parseGpxRoute(
   };
 }
 
-export function saveRoutePreview(preview: RoutePreview) {
-  window.localStorage.setItem(ROUTE_PREVIEW_STORAGE_KEY, JSON.stringify(preview));
+export function saveRoutePreview(
+  preview: RoutePreview,
+  storageKey = ROUTE_PREVIEW_STORAGE_KEY,
+) {
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(preview));
+  } catch {
+    // The active page can still render when browser storage is unavailable.
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -608,15 +616,23 @@ function isStoredRoutePreview(value: unknown): value is RoutePreview {
   return true;
 }
 
-export function readRoutePreview() {
-  const raw = window.localStorage.getItem(ROUTE_PREVIEW_STORAGE_KEY);
-  if (!raw) return null;
-
+export function readRoutePreview(storageKey = ROUTE_PREVIEW_STORAGE_KEY) {
   try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     const normalized = normalizeStoredRoutePreview(parsed);
     return isStoredRoutePreview(normalized) ? normalized : null;
   } catch {
     return null;
   }
+}
+
+export function readActiveRoutePreview() {
+  const comparisonPane = new URLSearchParams(window.location.search).get("compare-pane");
+  return readRoutePreview(
+    comparisonPane === "left"
+      ? ROUTE_COMPARISON_LEFT_STORAGE_KEY
+      : ROUTE_PREVIEW_STORAGE_KEY,
+  );
 }

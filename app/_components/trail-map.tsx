@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  readRoutePreview,
+  readActiveRoutePreview,
   type PreviewGeographicPoint,
   type PreviewMapPoint,
   type RoutePreview,
@@ -540,7 +540,7 @@ export function TrailMap() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setRoutePreview(readRoutePreview());
+      setRoutePreview(readActiveRoutePreview());
       setRoutePreviewLoaded(true);
     }, 0);
     return () => window.clearTimeout(timer);

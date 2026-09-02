@@ -219,7 +219,12 @@ export function RouteIntake() {
     }
 
     saveRoutePreview(preview);
-    transitionTo("/analyzing");
+    const comparisonPane = new URLSearchParams(window.location.search).get("compare-pane");
+    transitionTo(
+      comparisonPane === "right"
+        ? "/analyzing?compare-pane=right"
+        : "/analyzing",
+    );
   }
 
   return (

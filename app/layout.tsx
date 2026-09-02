@@ -42,6 +42,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <Script id="track4trek-language" strategy="beforeInteractive">
           {`try{const language=localStorage.getItem("track4trek:language")==="zh"?"zh":"en";document.documentElement.dataset.track4trekLanguage=language;document.documentElement.lang=language==="zh"?"zh-CN":"en"}catch{}`}
         </Script>
+        <Script id="track4trek-pane" strategy="beforeInteractive">
+          {`try{const pane=new URLSearchParams(location.search).get("compare-pane");if(pane==="left"||pane==="right")document.documentElement.dataset.track4trekPane="comparison"}catch{}`}
+        </Script>
         <LanguageProvider>
           <SiteScenery />
           <PersistentSiteHeader />

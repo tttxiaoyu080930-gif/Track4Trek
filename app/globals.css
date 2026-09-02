@@ -7289,3 +7289,167 @@ html[data-track4trek-theme="light"] .pro-weather-table th:first-child { backgrou
 @media (prefers-reduced-motion: reduce) {
   .surface-condition-bar > i { transition: none; }
 }
+
+/* Side-by-side route comparison */
+
+.route-comparison-toggle {
+  width: 42px;
+  height: 42px;
+  padding: 9px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 50%;
+  background: var(--control-glass);
+  color: var(--text-soft);
+  box-shadow: 0 15px 50px rgba(0, 7, 16, 0.16);
+  -webkit-backdrop-filter: blur(24px) saturate(1.08);
+  backdrop-filter: blur(24px) saturate(1.08);
+  cursor: pointer;
+  transition: color 180ms ease, border-color 180ms ease, background 180ms ease, transform 180ms ease;
+}
+
+.route-comparison-toggle:hover {
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.route-comparison-toggle.is-active {
+  border-color: color-mix(in srgb, var(--orange-light) 62%, transparent);
+  background: color-mix(in srgb, var(--orange) 22%, var(--control-glass));
+  color: var(--text);
+}
+
+.route-comparison-toggle svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.45;
+}
+
+.route-comparison-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--orange-light) 76%, white);
+  outline-offset: 3px;
+}
+
+html.is-comparison-open,
+html.is-comparison-open body {
+  overflow: hidden;
+}
+
+html[data-track4trek-pane="comparison"] .site-header {
+  display: none !important;
+}
+
+.route-comparison-workspace {
+  position: fixed;
+  z-index: 45;
+  inset: 0;
+  padding: max(92px, calc(76px + env(safe-area-inset-top))) 14px 14px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(0.94);
+  backdrop-filter: blur(20px) saturate(0.94);
+  animation: comparison-workspace-in 360ms cubic-bezier(0.2, 0.72, 0.2, 1) both;
+}
+
+.route-comparison-track {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 24px;
+  background: var(--line-soft);
+  box-shadow: 0 28px 80px rgba(0, 5, 14, 0.34);
+}
+
+.route-comparison-pane {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 46px minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.route-comparison-pane > header {
+  min-width: 0;
+  padding: 0 17px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--control-glass) 88%, var(--bg));
+  color: var(--muted);
+}
+
+.route-comparison-pane > header span {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--orange-light) 78%, var(--text));
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.route-comparison-pane > header strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 540;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-comparison-pane iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--bg);
+}
+
+@keyframes comparison-workspace-in {
+  from { opacity: 0; transform: scale(0.985); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (max-width: 900px) {
+  .route-comparison-workspace {
+    padding-inline: 8px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .route-comparison-track {
+    width: max(1040px, calc(200vw - 16px));
+  }
+}
+
+@media (max-width: 720px) {
+  .route-comparison-toggle {
+    width: 38px;
+    height: 38px;
+    padding: 8px;
+  }
+
+  .site-brand { max-width: calc(100vw - 219px); }
+  .route-comparison-workspace { padding-top: max(76px, calc(66px + env(safe-area-inset-top))); }
+}
+
+@media (max-width: 480px) {
+  .site-brand { max-width: calc(100vw - 207px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-comparison-workspace { animation: none; }
+  .route-comparison-toggle { transition: none; }
+}

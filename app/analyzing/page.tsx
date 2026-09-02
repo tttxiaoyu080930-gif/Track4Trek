@@ -36,7 +36,11 @@ export default function AnalyzingPage() {
 
   useEffect(() => {
     if (progress !== 100) return;
-    const redirect = window.setTimeout(() => transitionTo("/results"), 500);
+    const comparisonPane = new URLSearchParams(window.location.search).get("compare-pane");
+    const destination = comparisonPane === "right"
+      ? "/results?compare-pane=right"
+      : "/results";
+    const redirect = window.setTimeout(() => transitionTo(destination), 500);
     return () => window.clearTimeout(redirect);
   }, [progress, transitionTo]);
 
@@ -78,7 +82,17 @@ export default function AnalyzingPage() {
         </div>
 
         <div className="simple-loading-actions">
-          <TransitionLink href="/">{text("Cancel", "取消")}</TransitionLink>
+          <TransitionLink
+            href="/"
+            onClick={(event) => {
+              const comparisonPane = new URLSearchParams(window.location.search).get("compare-pane");
+              if (comparisonPane !== "right") return;
+              event.preventDefault();
+              transitionTo("/?compare-pane=right");
+            }}
+          >
+            {text("Cancel", "取消")}
+          </TransitionLink>
         </div>
 
         <p className="visually-hidden">
