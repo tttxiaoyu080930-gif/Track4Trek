@@ -296,6 +296,12 @@ pnpm run build:vercel
 - `docs/HOMEPAGE_BUILD_GUIDE.md` — beginner-oriented building and publishing guide
 - `docs/open-source-stack.md` — open-source GIS stack notes
 
+## Interaction performance
+
+Overview elevation and weather canvases share a frame-coalesced rendering hook: resize, theme and interaction updates paint at most once per animation frame. Off-screen canvases and hidden browser tabs defer painting until visible, and observers are cleaned up on unmount. Canvas buffers are resized only when dimensions change; elevation preprocessing is reused between hover updates. Pro mode is loaded on demand. Scenery movement uses composited transforms instead of animating the full-resolution image crop. Theme changes also refresh charts inside comparison panes.
+
+`tests/canvas-render.test.mjs` checks frame coalescing, off-screen/hidden-tab suspension, resumption and cleanup. These optimizations are not a guarantee of a particular frame rate: terrain loading still depends on device GPU and provider/network response times.
+
 ## License and attribution direction
 
 Route recommendations will be explainable and source-linked. Before production release, the project should add the selected data providers' required map attribution, a project license, privacy language, and a versioned methodology page. Garmin names and category bands are used only as reference material; Track4Trek estimates remain independent.

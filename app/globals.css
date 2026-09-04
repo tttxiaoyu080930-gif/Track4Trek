@@ -4096,14 +4096,14 @@ body {
 
 .site-scenery-image {
   object-fit: cover;
-  object-position: var(--scene-x, 22%) var(--scene-y, 54%);
-  transform: scale(var(--scene-scale, 1.045));
+  object-position: center;
+  /* Move the composited image instead of repainting its full-resolution crop. */
+  transform: scale(1.12) translate3d(calc((50% - var(--scene-x, 22%)) * 0.08), calc((50% - var(--scene-y, 54%)) * 0.08), 0);
   transition:
     opacity 650ms ease,
-    object-position 1450ms cubic-bezier(0.22, 1, 0.36, 1),
     transform 1450ms cubic-bezier(0.22, 1, 0.36, 1),
     filter 650ms ease;
-  will-change: opacity, object-position, transform;
+  will-change: opacity, transform;
 }
 
 .site-scenery-dark {

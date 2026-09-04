@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import type {
   RouteWeatherData,
@@ -16,7 +16,7 @@ import {
   type ComprehensiveRouteDifficulty,
 } from "../_lib/route-difficulty";
 import { useLanguage, type Track4TrekLanguage } from "./language-system";
-import { THEME_CHANGE_EVENT } from "./theme-system";
+import { useCanvasRender } from "./use-canvas-render";
 import { useRouteWeather } from "./use-route-weather";
 import { useRouteSurface } from "./use-route-surface";
 import { ChartXPan, ChartXZoom } from "./chart-x-zoom";
@@ -367,8 +367,10 @@ export function WeatherDifficultyChart({ preview, analysis }: WeatherDifficultyC
     const bounds = canvas.getBoundingClientRect();
     if (!bounds.width || !bounds.height) return;
     const density = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.round(bounds.width * density);
-    canvas.height = Math.round(bounds.height * density);
+    const pixelWidth = Math.round(bounds.width * density);
+    const pixelHeight = Math.round(bounds.height * density);
+    if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+    if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
     const context = canvas.getContext("2d");
     if (!context) return;
     const isLight = document.documentElement.dataset.track4trekTheme === "light";
@@ -408,19 +410,7 @@ export function WeatherDifficultyChart({ preview, analysis }: WeatherDifficultyC
     context.beginPath(); context.arc(activePoint.x, activePoint.y, 5, 0, Math.PI * 2); context.fillStyle = activeLayerMeta.color; context.fill();
   }, [activeLayer, activeLayerMeta.color, chartMonthIndices, comprehensiveMonthly, monthly, selectedIndex, visibleEndIndex, visibleStartIndex]);
 
-  useEffect(() => {
-    drawChart();
-    const canvas = canvasRef.current;
-    if (!canvas) return undefined;
-    const observer = new ResizeObserver(drawChart);
-    observer.observe(canvas);
-    return () => observer.disconnect();
-  }, [drawChart]);
-
-  useEffect(() => {
-    window.addEventListener(THEME_CHANGE_EVENT, drawChart);
-    return () => window.removeEventListener(THEME_CHANGE_EVENT, drawChart);
-  }, [drawChart]);
+  useCanvasRender(canvasRef, drawChart);
 
   const indexFromPointer = (clientX: number) => {
     const canvas = canvasRef.current;

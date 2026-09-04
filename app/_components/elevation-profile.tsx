@@ -8,7 +8,7 @@ import {
   type RoutePreview,
 } from "../_lib/route-data";
 import { useLanguage } from "./language-system";
-import { THEME_CHANGE_EVENT } from "./theme-system";
+import { useCanvasRender } from "./use-canvas-render";
 import { ChartXPan, ChartXZoom } from "./chart-x-zoom";
 
 type ElevationChartMode = "elevation" | "grade";
@@ -271,13 +271,16 @@ function drawElevationProfile(
   zoom: number,
   pan: number,
   activePoint: PreparedProfilePoint | null,
+  preparedPoints: PreparedProfilePoint[],
 ) {
   const bounds = canvas.getBoundingClientRect();
   if (!bounds.width || !bounds.height) return;
 
   const density = Math.min(window.devicePixelRatio || 1, 2);
-  canvas.width = Math.round(bounds.width * density);
-  canvas.height = Math.round(bounds.height * density);
+  const pixelWidth = Math.round(bounds.width * density);
+  const pixelHeight = Math.round(bounds.height * density);
+  if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+  if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
 
   const context = canvas.getContext("2d");
   if (!context) return;
@@ -294,7 +297,6 @@ function drawElevationProfile(
     profile.points.at(-1)?.distanceKm ?? 0,
     0.001,
   );
-  const preparedPoints = prepareProfilePoints(profile.points);
   if (preparedPoints.length < 2) return;
   const visibleDistance = totalDistance / Math.max(zoom, 1);
   const visibleStart =
@@ -572,8 +574,8 @@ export function ElevationProfile() {
         language === "zh"
           ? `最大下坡 −${Math.abs(gradePercent).toFixed(1)}% · ${distanceKm.toFixed(1)} 公里`
           : `DOWN −${Math.abs(gradePercent).toFixed(1)}% · ${distanceKm.toFixed(1)} km`,
-    }, xZoom, xPan, activePoint);
-  }, [activePoint, chartMode, language, profile, xPan, xZoom]);
+    }, xZoom, xPan, activePoint, preparedPoints);
+  }, [activePoint, chartMode, language, profile, preparedPoints, xPan, xZoom]);
 
   const selectPointFromClientX = (clientX: number) => {
     const canvas = canvasRef.current;
@@ -606,19 +608,7 @@ export function ElevationProfile() {
     );
   };
 
-  useEffect(() => {
-    drawChart();
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const observer = new ResizeObserver(drawChart);
-    observer.observe(canvas);
-    window.addEventListener(THEME_CHANGE_EVENT, drawChart);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener(THEME_CHANGE_EVENT, drawChart);
-    };
-  }, [drawChart]);
+  useCanvasRender(canvasRef, drawChart);
 
   return (
     <section

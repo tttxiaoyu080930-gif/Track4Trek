@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { ElevationProfile } from "../_components/elevation-profile";
 import { EnvironmentCycle } from "../_components/environment-cycle";
 import { useLanguage } from "../_components/language-system";
 import { PostActivityForecast } from "../_components/post-activity-forecast";
-import { ProRouteWorkspace } from "../_components/pro-route-workspace";
 import { ResultModeSwitch } from "../_components/result-mode-switch";
 import {
   RouteDemandMetrics,
@@ -28,6 +28,11 @@ type StoredAnalysisState = {
   analysis: RouteDemandAnalysis | null;
   preview: RoutePreview | null;
 };
+
+const ProRouteWorkspace = dynamic(
+  () => import("../_components/pro-route-workspace").then((module) => module.ProRouteWorkspace),
+  { loading: () => <p role="status" className="pro-empty-state">Loading / 正在加载…</p> },
+);
 
 export default function ResultsPage() {
   const { language, text } = useLanguage();

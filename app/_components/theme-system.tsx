@@ -36,6 +36,7 @@ export function SiteScenery() {
       if (event.key !== THEME_STORAGE_KEY) return;
       document.documentElement.dataset.track4trekTheme =
         event.newValue === "light" ? "light" : "dark";
+      window.dispatchEvent(new CustomEvent(THEME_CHANGE_EVENT));
     };
 
     window.addEventListener("storage", handleStorage);
