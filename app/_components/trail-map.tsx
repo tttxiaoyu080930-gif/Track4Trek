@@ -499,7 +499,7 @@ function drawTerrain(
 
 }
 
-export function TrailMap() {
+export function TrailMap({ onMapStatus }: { onMapStatus?: (status: TerrainMapStatus) => void } = {}) {
   const { language, text } = useLanguage();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const languageRef = useRef(language);
@@ -548,8 +548,9 @@ export function TrailMap() {
 
   const handleRealMapStatus = useCallback((status: TerrainMapStatus) => {
     setRealMapStatus(status);
+    onMapStatus?.(status);
     if (status === "error") setPresentationStage("detail");
-  }, []);
+  }, [onMapStatus]);
 
   const handleRealMapIntroComplete = useCallback(() => {
     setPresentationStage("detail");
@@ -675,7 +676,7 @@ export function TrailMap() {
       if (redrawTerrainRef.current === drawCurrentTerrain) redrawTerrainRef.current = null;
       if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
     };
-  }, [hasRealMapData, routePath, routePreview]);
+  }, [hasRealMapData, routePath, routePreview, realMapStatus]);
 
   return (
     <section
@@ -717,13 +718,12 @@ export function TrailMap() {
           onStatusChange={handleRealMapStatus}
           onIntroComplete={handleRealMapIntroComplete}
         />
-        <canvas
+        {realMapStatus === "error" ? <canvas
           className="trail-map-canvas trail-contour-canvas"
           ref={canvasRef}
           role="application"
           aria-roledescription={text("interactive terrain map", "交互式地形地图")}
-          tabIndex={realMapStatus === "ready" ? -1 : 0}
-          aria-hidden={realMapStatus === "ready"}
+          tabIndex={0}
           data-contour-contrast="fixed"
           data-highest-altitude={highestAltitude ?? undefined}
           data-lowest-altitude={lowestAltitude ?? undefined}
@@ -737,7 +737,7 @@ export function TrailMap() {
             "A local contour terrain fallback with a highlighted trail.",
             "突出显示路线的本地等高线备用模型。",
           )}
-        </canvas>
+        </canvas> : null}
         <p className="visually-hidden" aria-live="polite">
           {realMapStatus === "loading"
             ? text("Loading real terrain map.", "正在加载真实地形地图。")

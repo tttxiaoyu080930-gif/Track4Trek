@@ -228,7 +228,7 @@ test("server-renders the real-map result flow, metric wheels, forecasts, and not
     "utf8",
   );
   assert.match(html, /Three-dimensional trail map/i);
-  assert.match(html, /trail-map-canvas/i);
+  assert.doesNotMatch(html, /trail-map-canvas/i);
   assert.match(html, /real geographic three-dimensional terrain map/i);
   assert.match(html, /data-map-engine="MapLibre GL JS"/i);
   assert.match(html, /data-basemap-source="OpenStreetMap"/i);
@@ -238,16 +238,14 @@ test("server-renders the real-map result flow, metric wheels, forecasts, and not
   assert.match(html, /role="group" aria-label="Terrain display"/i);
   assert.match(html, /aria-pressed="true"[^>]*>\s*Contour render/i);
   assert.match(html, /aria-pressed="false"[^>]*>\s*Real map/i);
-  assert.match(html, /local contour terrain fallback/i);
+  assert.doesNotMatch(html, /local contour terrain fallback/i);
   assert.match(html, /Total distance/i);
   assert.match(html, /Elevation range/i);
   assert.match(html, /Total ascent/i);
   assert.match(html, /Total descent/i);
   assert.match(html, /Highest elevation/i);
   assert.match(html, /Prototype values/i);
-  assert.match(html, /data-contour-contrast="fixed"/i);
-  assert.match(html, /data-highest-altitude="934"/i);
-  assert.match(html, /data-lowest-altitude="340"/i);
+  assert.doesNotMatch(html, /data-contour-contrast="fixed"/i);
   assert.match(html, /Highest altitude:.*934.*meters/i);
   assert.match(html, /Lowest altitude:.*340.*meters/i);
   assert.match(html, /Compare with another route/i);

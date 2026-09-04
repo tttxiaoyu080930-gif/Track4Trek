@@ -1,15 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import type { CSSProperties } from "react";
 import { useLanguage } from "../_components/language-system";
 import { usePageTransition } from "../_components/page-transition";
 import { TransitionLink } from "../_components/transition-link";
 
+const MapPreloader = dynamic(() => import("../_components/trail-map").then((module) => module.TrailMap), { ssr: false });
+
 export default function AnalyzingPage() {
   const transitionTo = usePageTransition();
   const { text } = useLanguage();
   const [progress, setProgress] = useState(0);
+  const [mapSettled, setMapSettled] = useState(false);
+  const handleMapStatus = useCallback((status: string) => {
+    if (status === "ready" || status === "error") setMapSettled(true);
+  }, []);
+  useEffect(() => {
+    // Never trap a route behind an unavailable tile provider.
+    const timeout = window.setTimeout(() => setMapSettled(true), 8000);
+    return () => window.clearTimeout(timeout);
+  }, []);
   const stages = [
     text("Reading route", "正在读取路线"),
     text("Sampling elevation", "正在采样海拔"),
@@ -27,12 +39,12 @@ export default function AnalyzingPage() {
           window.clearInterval(interval);
           return 100;
         }
-        return Math.min(100, current + increment);
+        return Math.min(mapSettled ? 100 : 95, current + increment);
       });
     }, 70);
 
     return () => window.clearInterval(interval);
-  }, []);
+  }, [mapSettled]);
 
   useEffect(() => {
     if (progress !== 100) return;
@@ -50,6 +62,9 @@ export default function AnalyzingPage() {
 
   return (
     <main className="site-page analysis-page simplified-analysis" id="main-content">
+      <div aria-hidden="true" inert style={{ position: "fixed", left: "-200vw", top: 0, width: "100vw", height: "100vh", pointerEvents: "none" }}>
+        <MapPreloader onMapStatus={handleMapStatus} />
+      </div>
       <a className="skip-link" href="#analysis-progress">
         {text("Skip to progress", "跳至分析进度")}
       </a>
