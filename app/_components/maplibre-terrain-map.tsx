@@ -4,7 +4,6 @@ import { useEffect, useRef } from "react";
 import type {
   ErrorEvent as MapLibreErrorEvent,
   ExpressionSpecification,
-  GeoJSONSource,
   Map as MapLibreMap,
   MapSourceDataEvent,
   Marker,
@@ -344,20 +343,15 @@ export function MapLibreTerrainMap({
     let disposed = false;
     let map: MapLibreMap | null = null;
     let resizeObserver: ResizeObserver | null = null;
-    let animationFrame: number | undefined;
-    let contourAnimationFrame: number | undefined;
-    let contourAnimationTimeout: number | undefined;
     let drapeRefreshTimeout: number | undefined;
     let loadTimeout: number | undefined;
-    let introTimeout: number | undefined;
     let terrainTimeout: number | undefined;
     let terrainInstalled = false;
     let introStarted = false;
-    let introScheduled = false;
     let introComplete = false;
     let mapRevealed = false;
     let contoursReady = false;
-    let currentRouteData = routeFeatureAtProgress(timeline, 0);
+    const currentRouteData = routeFeatureAtProgress(timeline, 1);
     const markers: Marker[] = [];
     const cleanupListeners: Array<() => void> = [];
 
@@ -378,13 +372,14 @@ export function MapLibreTerrainMap({
         }
 
         let activeTheme = mapTheme();
+        const bounds = routeBounds(timeline);
         map = new maplibregl.Map({
           container,
           style: fastMapStyle(activeTheme),
-          center: [timeline.segments[0].points[0].unwrappedLongitude, timeline.segments[0].points[0].latitude],
-          zoom: 11,
+          bounds: [[bounds.west, bounds.south], [bounds.east, bounds.north]],
+          fitBoundsOptions: { padding: 60, maxZoom: 14.5 },
           pitch: 64,
-          bearing: -28,
+          bearing: -24,
           maxPitch: 82,
           scrollZoom: false,
           fadeDuration: 0,
@@ -411,8 +406,8 @@ export function MapLibreTerrainMap({
         map.getCanvas().setAttribute(
           "aria-label",
           language === "zh"
-            ? "真实三维地形路线图。开场动画结束后，可拖动或使用左右方向键旋转。"
-            : "Real three-dimensional terrain route map. After the intro, drag or use the left and right arrow keys to rotate.",
+            ? "真实三维地形路线图。可拖动或使用左右方向键旋转。"
+            : "Real three-dimensional terrain route map. Drag or use the left and right arrow keys to rotate.",
         );
         map.dragPan.disable();
         map.addControl(
@@ -529,18 +524,6 @@ export function MapLibreTerrainMap({
           }, delay);
         };
 
-        const clearContourAnimation = () => {
-          if (contourAnimationFrame !== undefined) {
-            window.cancelAnimationFrame(contourAnimationFrame);
-            contourAnimationFrame = undefined;
-          }
-          if (contourAnimationTimeout !== undefined) {
-            window.clearTimeout(contourAnimationTimeout);
-            contourAnimationTimeout = undefined;
-          }
-          container.classList.remove("is-contour-revealing");
-        };
-
         const setBasemapVisibility = (visible: boolean) => {
           if (!map?.getLayer(BASEMAP_LAYER)) return;
           map.setLayoutProperty(BASEMAP_LAYER, "visibility", visible ? "visible" : "none");
@@ -572,75 +555,7 @@ export function MapLibreTerrainMap({
           0.62,
         ];
 
-        const animateContourReveal = () => {
-          if (!map || !contoursReady || !map.getLayer(CONTOUR_LAYER)) return;
-          clearContourAnimation();
-          const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-          if (reducedMotion) {
-            map.setPaintProperty(CONTOUR_LAYER, "line-opacity-transition", { duration: 0 });
-            map.setPaintProperty(CONTOUR_LAYER, "line-opacity", finalContourOpacity);
-            if (map.getLayer(BASEMAP_LAYER)) {
-              map.setPaintProperty(BASEMAP_LAYER, "raster-opacity-transition", { duration: 0 });
-              map.setPaintProperty(BASEMAP_LAYER, "raster-opacity", 0);
-              setBasemapVisibility(false);
-            }
-            if (map.getLayer(HILLSHADE_LAYER)) {
-              map.setPaintProperty(HILLSHADE_LAYER, "hillshade-exaggeration-transition", { duration: 0 });
-              map.setPaintProperty(HILLSHADE_LAYER, "hillshade-exaggeration", HILLSHADE_EXAGGERATION);
-            }
-            return;
-          }
-
-          map.setPaintProperty(CONTOUR_LAYER, "line-opacity-transition", { duration: 0 });
-          map.setPaintProperty(CONTOUR_LAYER, "line-opacity", 0);
-          if (map.getLayer(BASEMAP_LAYER)) {
-            setBasemapVisibility(true);
-            map.setPaintProperty(BASEMAP_LAYER, "raster-opacity-transition", { duration: 0 });
-            map.setPaintProperty(BASEMAP_LAYER, "raster-opacity", 1);
-          }
-          if (map.getLayer(HILLSHADE_LAYER)) {
-            map.setPaintProperty(HILLSHADE_LAYER, "hillshade-exaggeration-transition", { duration: 0 });
-            map.setPaintProperty(HILLSHADE_LAYER, "hillshade-exaggeration", 0);
-          }
-          contourAnimationFrame = window.requestAnimationFrame(() => {
-            contourAnimationFrame = undefined;
-            if (!map || disposed || displayModeRef.current !== "contour") return;
-            map.setPaintProperty(CONTOUR_LAYER, "line-opacity-transition", {
-              duration: 1_900,
-              delay: 80,
-            });
-            map.setPaintProperty(CONTOUR_LAYER, "line-opacity", finalContourOpacity);
-            if (map.getLayer(BASEMAP_LAYER)) {
-              map.setPaintProperty(BASEMAP_LAYER, "raster-opacity-transition", {
-                duration: 1_650,
-                delay: 120,
-              });
-              map.setPaintProperty(BASEMAP_LAYER, "raster-opacity", 0);
-            }
-            if (map.getLayer(HILLSHADE_LAYER)) {
-              map.setPaintProperty(HILLSHADE_LAYER, "hillshade-exaggeration-transition", {
-                duration: 1_650,
-                delay: 120,
-              });
-              map.setPaintProperty(
-                HILLSHADE_LAYER,
-                "hillshade-exaggeration",
-                HILLSHADE_EXAGGERATION,
-              );
-            }
-            container.classList.add("is-contour-revealing");
-            contourAnimationTimeout = window.setTimeout(() => {
-              contourAnimationTimeout = undefined;
-              if (map && displayModeRef.current === "contour") {
-                setBasemapVisibility(false);
-                map.triggerRepaint();
-              }
-              container.classList.remove("is-contour-revealing");
-            }, 2_100);
-          });
-        };
-
-        const applyDisplayMode = (mode: TerrainDisplayMode, replayContour = false) => {
+        const applyDisplayMode = (mode: TerrainDisplayMode) => {
           if (!map || !map.getStyle()) return;
           const wantsContours = mode === "contour";
           const showContours = wantsContours && contoursReady && map.getLayer(CONTOUR_LAYER);
@@ -648,15 +563,14 @@ export function MapLibreTerrainMap({
             window.clearTimeout(drapeRefreshTimeout);
             drapeRefreshTimeout = undefined;
           }
-          if (!wantsContours) clearContourAnimation();
           if (map.getLayer(BASEMAP_LAYER)) {
             setBasemapVisibility(true);
-            map.setPaintProperty(BASEMAP_LAYER, "raster-opacity-transition", { duration: 650 });
+            map.setPaintProperty(BASEMAP_LAYER, "raster-opacity-transition", { duration: 0 });
             map.setPaintProperty(BASEMAP_LAYER, "raster-opacity", showContours ? 0 : 1);
           }
           if (map.getLayer(HILLSHADE_LAYER)) {
             map.setPaintProperty(HILLSHADE_LAYER, "hillshade-exaggeration-transition", {
-              duration: 650,
+              duration: 0,
             });
             map.setPaintProperty(
               HILLSHADE_LAYER,
@@ -682,21 +596,20 @@ export function MapLibreTerrainMap({
                 ? "Three-dimensional contour route map derived from real elevation data. Drag or use the left and right arrow keys to rotate."
                 : "Real three-dimensional terrain route map. Drag or use the left and right arrow keys to rotate.",
           );
-          if (showContours && replayContour) {
-            animateContourReveal();
-          } else if (showContours) {
+          if (showContours) {
+            map.setPaintProperty(CONTOUR_LAYER, "line-opacity", finalContourOpacity);
             setBasemapVisibility(false);
           } else if (!wantsContours) {
             scheduleTerrainDrapeRefresh();
           }
         };
-        applyDisplayModeRef.current = (mode) => applyDisplayMode(mode, mode === "contour");
+        applyDisplayModeRef.current = (mode) => applyDisplayMode(mode);
 
         const markContoursReady = () => {
           if (!map || contoursReady || !map.getLayer(CONTOUR_LAYER)) return;
           contoursReady = true;
           container.dataset.contours = "ready";
-          applyDisplayMode(displayModeRef.current, displayModeRef.current === "contour");
+          applyDisplayMode(displayModeRef.current);
           if (!mapRevealed) revealMap();
         };
 
@@ -767,69 +680,14 @@ export function MapLibreTerrainMap({
           );
         }
 
-        const beginIntro = () => {
+        const showRoute = () => {
           if (!map || disposed || introStarted) return;
           introStarted = true;
+          introComplete = true;
           installRouteLayer();
-          const bounds = routeBounds(timeline);
-          const compact = container.clientWidth < 720;
-          map.fitBounds(
-            [[bounds.west, bounds.south], [bounds.east, bounds.north]],
-            {
-              padding: compact
-                ? { top: 92, right: 34, bottom: 104, left: 34 }
-                : { top: 92, right: 110, bottom: 92, left: 110 },
-              maxZoom: 14.5,
-              pitch: 64,
-              bearing: -24,
-              duration: 0,
-            },
-          );
-          scheduleTerrainLayers(180);
-          map.once("idle", revealMap);
-
-          const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-          if (reducedMotion) {
-            currentRouteData = routeFeatureAtProgress(timeline, 1);
-            void (map.getSource(ROUTE_SOURCE) as GeoJSONSource | undefined)?.setData(currentRouteData);
-            map.jumpTo({ pitch: 66, bearing: 8 });
-            introComplete = true;
-            container.classList.add("is-map-intro-complete");
-            introCallbackRef.current();
-            revealMap();
-            return;
-          }
-
-          map.easeTo({
-            bearing: 12,
-            pitch: 68,
-            duration: 3000,
-            easing: (progress) => 1 - (1 - progress) ** 3,
-          });
-          const animationStart = performance.now();
-          let lastRouteUpdate = 0;
-          const animateRoute = (now: number) => {
-            if (!map || disposed) return;
-            const elapsed = now - animationStart;
-            const progress = Math.min(elapsed / 2700, 1);
-            if (now - lastRouteUpdate >= 50 || progress >= 1) {
-              lastRouteUpdate = now;
-              currentRouteData = routeFeatureAtProgress(timeline, 1 - (1 - progress) ** 3);
-              void (map.getSource(ROUTE_SOURCE) as GeoJSONSource | undefined)?.setData(currentRouteData);
-            }
-
-            if (elapsed >= 2200) container.classList.add("is-map-intro-complete");
-            if (elapsed >= 3000) {
-              currentRouteData = routeFeatureAtProgress(timeline, 1);
-              void (map.getSource(ROUTE_SOURCE) as GeoJSONSource | undefined)?.setData(currentRouteData);
-              introComplete = true;
-              introCallbackRef.current();
-              revealMap();
-              return;
-            }
-            animationFrame = window.requestAnimationFrame(animateRoute);
-          };
-          animationFrame = window.requestAnimationFrame(animateRoute);
+          scheduleTerrainLayers(0);
+          introCallbackRef.current();
+          revealMap();
         };
 
         const handleStyleReady = () => {
@@ -837,14 +695,11 @@ export function MapLibreTerrainMap({
           terrainInstalled = false;
           installRouteLayer();
           if (introStarted) {
-            scheduleTerrainLayers(120);
+            scheduleTerrainLayers(0);
             revealMap();
             return;
           }
-          if (introScheduled) return;
-          introScheduled = true;
-          map.once("render", beginIntro);
-          introTimeout = window.setTimeout(beginIntro, 160);
+          showRoute();
         };
         map.on("style.load", handleStyleReady);
         map.on("load", handleStyleReady);
@@ -861,7 +716,6 @@ export function MapLibreTerrainMap({
           terrainInstalled = false;
           contoursReady = false;
           mapRevealed = false;
-          clearContourAnimation();
           container.classList.remove("is-contour-revealing");
           container.dataset.contours = "loading";
           statusCallbackRef.current("loading");
@@ -937,12 +791,8 @@ export function MapLibreTerrainMap({
       cleanupListeners.forEach((cleanup) => cleanup());
       resizeObserver?.disconnect();
       markers.forEach((marker) => marker.remove());
-      if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
-      if (contourAnimationFrame !== undefined) window.cancelAnimationFrame(contourAnimationFrame);
-      if (contourAnimationTimeout !== undefined) window.clearTimeout(contourAnimationTimeout);
       if (drapeRefreshTimeout !== undefined) window.clearTimeout(drapeRefreshTimeout);
       if (loadTimeout !== undefined) window.clearTimeout(loadTimeout);
-      if (introTimeout !== undefined) window.clearTimeout(introTimeout);
       if (terrainTimeout !== undefined) window.clearTimeout(terrainTimeout);
       applyDisplayModeRef.current = () => undefined;
       container.classList.remove("is-contour-revealing");

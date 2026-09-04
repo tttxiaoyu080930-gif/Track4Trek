@@ -28,25 +28,21 @@ test("real terrain reveal has short, bounded fallback timings", async () => {
     new URL("../app/_components/maplibre-terrain-map.tsx", import.meta.url),
     "utf8",
   );
-  const introDelayMatch = source.match(
-    /introTimeout\s*=\s*window\.setTimeout\(beginIntro,\s*([\d_]+)\s*\)/,
-  );
   const loadTimeoutMatch = source.match(
     /loadTimeout\s*=\s*window\.setTimeout\([\s\S]*?\},\s*([\d_]+)\s*\)/,
   );
 
-  assert.ok(introDelayMatch, "the map needs a fallback that starts the reveal without waiting for idle");
   assert.ok(loadTimeoutMatch, "the map needs a bounded failure timeout");
 
-  const introDelayMs = Number(introDelayMatch[1].replaceAll("_", ""));
   const loadTimeoutMs = Number(loadTimeoutMatch[1].replaceAll("_", ""));
-  assert.ok(introDelayMs <= 1_000, `route reveal fallback is too slow: ${introDelayMs}ms`);
   assert.ok(loadTimeoutMs <= 20_000, `map failure fallback is too slow: ${loadTimeoutMs}ms`);
-  assert.match(source, /map\.once\("render", beginIntro\)/);
+  assert.doesNotMatch(source, /animateRoute|animateContourReveal|beginIntro/);
+  assert.match(source, /const currentRouteData = routeFeatureAtProgress\(timeline, 1\)/);
+  assert.match(source, /fitBoundsOptions/);
   assert.match(source, /map\.isSourceLoaded\(BASEMAP_SOURCE\)/);
   assert.match(source, /disposed \|\| mapRevealed/);
   assert.match(source, /style:\s*fastMapStyle\(activeTheme\)/);
-  assert.match(source, /scheduleTerrainLayers\(180\)/);
+  assert.match(source, /scheduleTerrainLayers\(0\)/);
   assert.doesNotMatch(source, /tiles\.openfreemap\.org\/styles/);
   assert.match(source, /statusCallbackRef\.current\("ready"\)/);
 });

@@ -506,7 +506,7 @@ export function TrailMap() {
   const redrawTerrainRef = useRef<(() => void) | null>(null);
   const visualStateRef = useRef({ routeProgress: 0, elevationVisibility: 0, yaw: -0.48 });
   const activePaletteRef = useRef<ContourPalette>(FIXED_CONTOUR_PALETTE);
-  const [presentationStage, setPresentationStage] = useState<"intro" | "detail">("intro");
+  const [presentationStage, setPresentationStage] = useState<"intro" | "detail">("detail");
   const [routePreview, setRoutePreview] = useState<RoutePreview | null>(null);
   const [routePreviewLoaded, setRoutePreviewLoaded] = useState(false);
   const [realMapStatus, setRealMapStatus] = useState<TerrainMapStatus>("idle");
@@ -565,18 +565,14 @@ export function TrailMap() {
     if (!canvas) return;
 
     let disposed = false;
-    let animationFrame: number | undefined;
-    let detailShown = false;
+    const detailShown = true;
     let dragMode: "pointer" | "mouse" | null = null;
     let previousPointerX = 0;
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const animateFallback = !hasRealMapData;
-    const animationStart = performance.now();
     const visualState = visualStateRef.current;
     activePaletteRef.current = FIXED_CONTOUR_PALETTE;
-    visualState.routeProgress = reducedMotion || !animateFallback ? 1 : 0;
-    visualState.elevationVisibility = animateFallback && reducedMotion ? 1 : 0;
-    visualState.yaw = reducedMotion || !animateFallback ? 0.28 : -0.48;
+    visualState.routeProgress = 1;
+    visualState.elevationVisibility = 1;
+    visualState.yaw = 0.28;
     const drawCurrentTerrain = () => {
       drawTerrain(
         canvas,
@@ -661,43 +657,9 @@ export function TrailMap() {
     window.addEventListener("mouseup", endMouseRotation);
     canvas.addEventListener("keydown", handleKeyDown);
 
-    if (!animateFallback) {
-      detailShown = true;
-      animationFrame = window.requestAnimationFrame(() => {
-        if (!disposed) drawCurrentTerrain();
-      });
-    } else if (reducedMotion) {
-      detailShown = true;
-      animationFrame = window.requestAnimationFrame(() => {
-        if (disposed) return;
-        if (!hasRealMapData) setPresentationStage("detail");
-        drawCurrentTerrain();
-      });
-    } else {
-      const animate = (now: number) => {
-        if (disposed) return;
-        const elapsed = now - animationStart;
-        const routeProgress = Math.min(elapsed / 2700, 1);
-        const cameraProgress = Math.min(elapsed / 3000, 1);
-        const peakEntrance = Math.min(Math.max((elapsed - 300) / 650, 0), 1);
-        const peakExit = Math.min(Math.max((elapsed - 2050) / 650, 0), 1);
-        const easedCameraProgress = 1 - Math.pow(1 - cameraProgress, 3);
-        visualState.routeProgress = 1 - Math.pow(1 - routeProgress, 3);
-        const easedPeakEntrance = peakEntrance * peakEntrance * (3 - 2 * peakEntrance);
-        const easedPeakExit = peakExit * peakExit * (3 - 2 * peakExit);
-        visualState.elevationVisibility = easedPeakEntrance * (1 - easedPeakExit);
-        visualState.yaw = -0.48 + easedCameraProgress * 0.78;
-        drawCurrentTerrain();
-
-        if (elapsed >= 3000 && !detailShown) {
-          detailShown = true;
-          if (!hasRealMapData) setPresentationStage("detail");
-        }
-
-        if (elapsed < 3000) animationFrame = window.requestAnimationFrame(animate);
-      };
-      animationFrame = window.requestAnimationFrame(animate);
-    }
+    const animationFrame = window.requestAnimationFrame(() => {
+      if (!disposed) drawCurrentTerrain();
+    });
 
     return () => {
       disposed = true;
@@ -726,14 +688,14 @@ export function TrailMap() {
       </h1>
       <p className="visually-hidden">
         {text(
-          "A real geographic three-dimensional terrain map with contours generated from Mapterhorn elevation data, an animated route, start and finish markers, and route statistics. A local contour model remains available only if online terrain fails.",
-          "真实地理位置的三维地形地图，等高线由 Mapterhorn 高程数据生成，并包含路线动画、起终点标记和路线统计；仅在在线地形加载失败时显示本地等高线备用模型。",
+          "A real geographic three-dimensional terrain map with contours generated from Mapterhorn elevation data, a highlighted route, start and finish markers, and route statistics. A local contour model remains available only if online terrain fails.",
+          "真实地理位置的三维地形地图，等高线由 Mapterhorn 高程数据生成，并包含高亮路线、起终点标记和路线统计；仅在在线地形加载失败时显示本地等高线备用模型。",
         )}
       </p>
       <p className="visually-hidden" id="terrain-rotation-help">
         {text(
-          "After the opening animation, drag horizontally or use the left and right arrow keys to rotate the terrain.",
-          "开场动画结束后，可水平拖动，或使用左右方向键旋转地形。",
+          "Drag horizontally or use the left and right arrow keys to rotate the terrain.",
+          "可水平拖动，或使用左右方向键旋转地形。",
         )}
       </p>
       <p className="visually-hidden" id="terrain-contrast-help">
@@ -825,7 +787,7 @@ export function TrailMap() {
             type="button"
             onClick={() => {
               setRealMapStatus("loading");
-              setPresentationStage("intro");
+              setPresentationStage("detail");
               setMapAttempt((attempt) => attempt + 1);
             }}
           >

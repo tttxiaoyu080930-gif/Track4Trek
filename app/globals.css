@@ -2490,9 +2490,9 @@ html[data-track4trek-theme="light"] .terrain-display-switch {
 .real-map-marker-high i { background: #f5bd72; }
 .real-map-marker-low i { background: #79c7dd; }
 
-.trail-real-map.is-map-intro-complete :is(.real-map-marker-high, .real-map-marker-low) {
-  opacity: 0;
-  transform: translateY(-7px);
+.trail-map-shell :is(.trail-map-stage, .trail-route-facts, .trail-route-facts dl > div, .trail-real-map, .trail-contour-canvas) {
+  transition: none !important;
+  animation: none !important;
 }
 
 .trail-map-fallback-notice {
