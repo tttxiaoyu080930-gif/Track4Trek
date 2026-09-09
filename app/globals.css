@@ -4843,7 +4843,17 @@ html[data-track4trek-theme="light"] .trail-map-shell::before {
 }
 
 html[data-track4trek-language="zh"] body {
-  font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", var(--font-geist-sans), sans-serif;
+  font-family: "PingFang SC", "Hiragino Sans GB", "Source Han Sans SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-synthesis: none;
+}
+
+html[data-track4trek-language="zh"] body :is(h1, h2, h3, h4, p, a, button, label, input, select, output, dt, dd, span, strong, small) {
+  font-family: inherit;
+  letter-spacing: normal;
+}
+
+html[data-track4trek-language="zh"] body :is(p, label, dt, dd, small) {
+  line-height: 1.65;
 }
 
 @media (max-width: 720px) {
@@ -4874,6 +4884,100 @@ html[data-track4trek-language="zh"] body {
   }
 
   .brand-copy small { max-width: 110px; }
+}
+
+/* Phone readability and collision protection */
+@media (max-width: 720px) {
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body { min-width: 0; overflow-x: clip; font-size: 16px; }
+  main, section, article, aside, div, dl { min-width: 0; }
+
+  main :is(h1, h2, h3, h4, p, label, dt, dd, small, a, button, output) {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  main :is(p, label, dt, dd) { line-height: 1.55; }
+  main :is(button, input, select) { min-height: 44px; }
+
+  .landing-title,
+  .results-page .result-story-title,
+  .pro-workspace-header h2 {
+    font-size: clamp(2rem, 10vw, 3.25rem);
+    line-height: 1.08;
+    letter-spacing: -0.035em;
+    text-wrap: balance;
+  }
+
+  .survey-panel,
+  .sample-library-dialog,
+  .archive-dialog {
+    max-height: calc(100svh - 24px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .results-page .result-story-section {
+    width: calc(100% - 24px);
+    padding-block: 72px;
+    row-gap: 28px;
+  }
+
+  .results-page .result-story-panel,
+  .weather-panel,
+  .metrics-panel { width: 100%; min-width: 0; }
+
+  .trail-route-facts dl { gap: 16px 10px; }
+  .trail-route-facts dt,
+  .elevation-profile-readout dt,
+  .weather-dashboard :is(dt, small),
+  .activity-forecast-disclaimer,
+  .chart-x-zoom,
+  .chart-x-pan,
+  .pro-workspace :is(dt, small) { font-size: 0.75rem; }
+
+  .terrain-display-switch button,
+  .elevation-profile-mode button,
+  .pro-chart-mode button { font-size: 0.875rem; }
+
+  .chart-x-zoom,
+  .chart-x-pan {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    text-transform: none;
+  }
+  .chart-x-zoom > output,
+  .chart-x-pan > output {
+    min-width: 0;
+    justify-items: start;
+    text-align: left;
+  }
+  .chart-x-zoom > output small,
+  .chart-x-pan > output { white-space: normal; }
+
+  .pro-data-table,
+  .pro-weather-table-wrap,
+  .pro-weather-hourly-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  html[data-track4trek-language="zh"] .language-toggle-option { font-size: 0.875rem; }
+  html[data-track4trek-language="zh"] main :is(.result-story-title, .watch-demand-dial, .weather-dashboard, .pro-workspace) {
+    word-break: normal;
+    line-break: strict;
+  }
+}
+
+@media (max-width: 420px) {
+  .site-header,
+  .landing-page .site-header,
+  .simplified-analysis .site-header,
+  .results-page .site-header { padding-inline: 12px; }
+  .header-controls { gap: 4px; }
+  .language-toggle { min-width: 70px; padding-inline: 5px; }
+  .site-brand { max-width: calc(100vw - 158px); }
+  .brand-copy strong { font-size: 0.95rem; }
+  .results-page .result-story-section { width: calc(100% - 18px); }
+  .pro-output-grid,
+  .pro-output-grid-forecast { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 480px) {
