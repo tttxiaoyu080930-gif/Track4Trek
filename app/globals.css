@@ -4980,6 +4980,64 @@ html[data-track4trek-language="zh"] body :is(p, label, dt, dd, small) {
   .pro-output-grid-forecast { grid-template-columns: 1fr; }
 }
 
+/* Keep the route summary full-width below the map on phones. This must remain
+   after the desktop map composition rules so their 25vw rail cannot win. */
+@media (max-width: 720px) {
+  .trail-map-shell {
+    height: max(100svh, 900px);
+    min-height: 900px;
+  }
+
+  .trail-route-facts,
+  .trail-map-shell.is-detail-stage .trail-route-facts {
+    right: 22px;
+    left: 22px;
+    width: auto;
+    max-width: none;
+    transform: none;
+  }
+
+  .trail-route-facts dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px 20px;
+  }
+
+  .trail-route-facts dl > div { overflow: hidden; }
+  .trail-route-facts dt {
+    min-height: 1.55em;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .trail-route-facts dd {
+    gap: 5px;
+    white-space: nowrap;
+  }
+  .trail-route-facts dd strong {
+    min-width: 0;
+    font-size: clamp(1.75rem, 8vw, 2.2rem);
+    letter-spacing: -0.035em;
+  }
+  .trail-route-facts dd span {
+    flex: 0 0 auto;
+    font-size: 0.72rem;
+  }
+
+  html[data-track4trek-language="zh"] .trail-route-facts dt {
+    word-break: keep-all;
+    line-break: strict;
+  }
+}
+
+@media (max-width: 380px) {
+  .trail-route-facts,
+  .trail-map-shell.is-detail-stage .trail-route-facts {
+    right: 16px;
+    left: 16px;
+  }
+  .trail-route-facts dl { column-gap: 14px; }
+  .trail-route-facts dd strong { font-size: clamp(1.55rem, 7.8vw, 1.9rem); }
+}
+
 @media (max-width: 480px) {
   .site-brand {
     max-width: calc(100vw - 168px);
